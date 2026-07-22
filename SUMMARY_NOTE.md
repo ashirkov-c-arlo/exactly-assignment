@@ -33,8 +33,9 @@ Three identity traps are handled by brief-aware context, not image hashing: cal_
 Motivated by **FB-002**: for a brief requesting a subjective quality (comfortable/relaxed),
 production makes the model return `subjective_requirements: [{requirement, status:
 supported|ambiguous|failed, visible_evidence}]` graded from pixels, then enforces ship-consistency
-(ship needs `supported`+evidence; `ambiguous`→human_review; `failed`→not ship; missing/invented →
-repair, never an invented verdict). The instruction is record-specific (names the exact word; the
+(ship needs `supported`+evidence; `ambiguous`→human_review unless a higher-priority reject/unsupported
+applies; `failed`→reject grounded on a POSE-01 issue; missing/invented → repair, never an invented
+verdict). The instruction is record-specific (names the exact word; the
 field is forbidden otherwise). Baseline omits it; before/after are two live runs.
 
 I split false approvals into three metrics because "any non-ship" conflates distinct failures:
@@ -55,6 +56,10 @@ not a keyword; blocking-unknown stays 1 because **cal_005** persists.
 
 - **Run-to-run / cross-model variance**: cal_005 flips between human_review/reject/ship across runs
   and models; the reported before/after is one run — read it as observed, not definitive.
+- **Artifact provenance**: records now carry a `prompt_revision` hash so a stale artifact is
+  detectable, but the committed `reviews.jsonl` predates revisioning (unstamped, treated as legacy).
+  A fresh 12-call production run would stamp it and re-verify under the current prompt; deferred
+  (Runware credit nearly exhausted).
 - **cal_005** (blocking-unknown false approval on flash-lite): the model grades the "comfortable"
   pose `supported` and ships where the label wants human_review. The check makes the judgement
   explicit and evidence-bound but cannot force a weak model to see ambiguity; an owner-labelled

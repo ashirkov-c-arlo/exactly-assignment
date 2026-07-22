@@ -328,6 +328,19 @@ class TestSubjectiveRequirement(unittest.TestCase):
         with self.assertRaises(core.ValidationError):  # not AttributeError/TypeError
             self._v(rec)
 
+    def test_malformed_status_dict_raises_validationerror(self):
+        rec = self._rec("ship", subjective_requirements=self._subj({}))  # unhashable status
+        with self.assertRaises(core.ValidationError):  # not TypeError from `in {...}`
+            self._v(rec)
+
+    def test_failed_without_pose_issue_rejected(self):
+        # 'failed' backed only by an unrelated serious issue (no POSE-01 issue) is rejected.
+        rec = self._rec("reject", subjective_requirements=self._subj("failed", source_ids=("POSE-01", "brief:cal_005")),
+                        issues=[{"severity": "major", "observation": "gradient shading",
+                                 "source_ids": ["STYLE-01"], "why_it_matters": "y", "suggested_fix": "z"}])
+        with self.assertRaises(core.ValidationError):
+            self._v(rec)
+
 
 class TestMetrics(unittest.TestCase):
     def test_three_false_approval_metrics_are_distinct(self):
@@ -469,6 +482,18 @@ class TestReusedFileValidation(unittest.TestCase):
         del recs[0]["model"]
         with self.assertRaises(ValueError):
             core.validate_result_file(recs, self.pack, "baseline", self.cal_ids)
+
+    def test_stale_prompt_revision_rejected(self):
+        recs = self._full_baseline()
+        recs[0]["prompt_revision"] = "0000deadbeef"  # != current
+        with self.assertRaises(ValueError):
+            core.validate_result_file(recs, self.pack, "baseline", self.cal_ids)
+
+    def test_matching_prompt_revision_accepted(self):
+        recs = self._full_baseline()
+        for r in recs:
+            r["prompt_revision"] = core.PROMPT_REVISION
+        core.validate_result_file(recs, self.pack, "baseline", self.cal_ids)  # must not raise
 
 
 class TestRequestAssemblyAndPromptHygiene(unittest.TestCase):

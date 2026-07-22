@@ -94,7 +94,7 @@ disagreement is visible there and explained (without altering the label) in `SUM
 uv run --locked python -m unittest discover -s tests
 ```
 
-Offline only — the model is always injected. 56 tests cover partial-batch failure isolation,
+Offline only — the model is always injected. 60 tests cover partial-batch failure isolation,
 truncation and unavailable-cost handling, the hardened semantic guardrails (missing/ non-unique
 check fields, verdict precedence, external-authority), the structured subjective-requirement check,
 the three false-approval metrics, reused-file validation (exact id sets / required fields / single
@@ -126,8 +126,11 @@ aggregated into `evaluation.json` → `operational`.
   bounded repair retry, else a schema-valid `provider_error`, and the batch continues.
 - **Model-graded subjective check.** The one improvement (FB-002): for a subjective brief the model
   must grade the requirement `supported`/`ambiguous`/`failed` with visible evidence; the pipeline
-  only enforces ship-consistency (ship⇒supported; ambiguous⇒human_review; failed⇒not ship). It never
-  invents ambiguity from a keyword. Production only.
+  enforces consistency within the reject > unsupported > human_review > ship precedence
+  (ship needs `supported`; `ambiguous`⇒human_review unless a higher-priority reject/unsupported
+  already applies; `failed`⇒reject grounded on a POSE-01 issue). It never invents ambiguity from a
+  keyword, and the field is stamped with a `prompt_revision` hash so a stale artifact is detectable.
+  Production only.
 - **Robust model I/O.** `max_tokens=8192` with `finish_reason` truncation detection; `max_retries=0`
   and a per-call timeout so one hung call cannot stall the batch; a missing `RUNWARE_API_KEY` exits
   cleanly (no traceback, no leak).
