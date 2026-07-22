@@ -64,8 +64,8 @@ and production are two live runs, so `evaluate` runs the 6 baseline calibration 
 reuses them via `--baseline-output`) and takes production from `--current-output ./reviews.jsonl`
 (or runs the 12 production calls live if omitted). Both files are re-validated: schema + semantics,
 **exact** id set (baseline = the 6 calibration ids, production = all 12), no unknown/duplicate ids,
-`model`/`prompt_version` required, current `prompt_revision` required for production (legacy baseline
-alone may omit it), and a single model across the run.
+`model`/`prompt_version` and the matching template `prompt_revision` required for every record, and
+a single model across the run.
 
 The baseline predictions are written to `evaluation.baseline.jsonl`, so a re-run can pass
 `--baseline-output evaluation.baseline.jsonl --current-output reviews.jsonl` and spend nothing.
@@ -96,7 +96,7 @@ disagreement is visible there and explained (without altering the label) in `SUM
 uv run --locked python -m unittest discover -s tests
 ```
 
-Offline only — the model is always injected. 63 tests cover partial-batch failure isolation,
+Offline only — the model is always injected. 64 tests cover partial-batch failure isolation,
 truncation and unavailable-cost handling, the hardened semantic guardrails (missing/ non-unique
 check fields, verdict precedence, external-authority), the structured subjective-requirement check,
 the three false-approval metrics, reused-file validation (exact id sets / required fields / single
@@ -107,7 +107,7 @@ model), fail-fast loading, request assembly, prompt hygiene, and a missing API k
 A full live loop is **12 production + 6 baseline calls** (~18, plus any bounded repair retries).
 Settings are deterministic (`temperature=0`, `max_tokens=8192`). The measured live run on
 `google-gemini-3-1-flash-lite` (input $0.25/M, output $1.50/M) cost **$0.051** total (20 calls,
-2 repair retries, ~64 s) — far under the USD 15 credit. Cost is computed from response token usage × the
+2 repair retries, ~66 s) — far under the USD 15 credit. Cost is computed from response token usage × the
 model's published per-token price (Runware's non-streaming response reports usage, not cost); if the
 price is unavailable it is reported as `null` with `cost_status`, never faked as $0. Totals are
 aggregated into `evaluation.json` → `operational`.
@@ -132,8 +132,8 @@ aggregated into `evaluation.json` → `operational`.
   (ship needs `supported`; `ambiguous`⇒human_review unless a higher-priority reject/unsupported
   already applies; `failed`⇒reject grounded on one major/critical issue citing POSE-01 and the
   current brief). It never invents ambiguity from a keyword. Every production record must carry the
-  current template `prompt_revision`; this is not a digest of per-record context or attachments.
-  Unstamped legacy records are accepted only for baseline.
+  matching template `prompt_revision`; unstamped records are rejected. This is not a digest of
+  per-record context or attachments.
 - **Robust model I/O.** `max_tokens=8192` with `finish_reason` truncation detection; `max_retries=0`
   and a per-call timeout so one hung call cannot stall the batch; a missing `RUNWARE_API_KEY` exits
   cleanly (no traceback, no leak).

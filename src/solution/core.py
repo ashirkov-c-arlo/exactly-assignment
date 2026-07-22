@@ -648,9 +648,8 @@ def validate_result_file(records: list[dict], pack: "TaskPack", expected_prompt_
         if pv != expected_prompt_version:
             raise ValueError(f"record {aid!r} prompt_version {pv!r}, expected {expected_prompt_version!r}")
         rev = r.get("prompt_revision")
-        if rev is None and expected_prompt_version == "production":
-            raise ValueError(f"record {aid!r} missing prompt_revision; production artifacts must "
-                             f"be regenerated with the current prompt")
+        if rev is None:
+            raise ValueError(f"record {aid!r} missing prompt_revision; regenerate the artifact")
         expected_revision = PROMPT_REVISIONS[expected_prompt_version]
         if rev is not None and rev != expected_revision:
             raise ValueError(f"record {aid!r} prompt_revision {rev!r} != current "

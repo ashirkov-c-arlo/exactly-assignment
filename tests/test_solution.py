@@ -468,7 +468,8 @@ class TestReusedFileValidation(unittest.TestCase):
     def _rec(self, aid, model="m1", pv="baseline"):
         return {"asset_id": aid, "processing_status": "provider_error", "verdict": None,
                 "summary": "s", "issues": [], "unverifiable_checks": [],
-                "blocking_reason": "b", "model": model, "prompt_version": pv}
+                "blocking_reason": "b", "model": model, "prompt_version": pv,
+                "prompt_revision": core.PROMPT_REVISIONS[pv]}
 
     def _full_baseline(self):
         return [self._rec(a) for a in self.cal_ids]
@@ -518,8 +519,15 @@ class TestReusedFileValidation(unittest.TestCase):
 
     def test_missing_production_prompt_revision_rejected(self):
         recs = [self._rec(a, pv="production") for a in self.cal_ids]
+        del recs[0]["prompt_revision"]
         with self.assertRaisesRegex(ValueError, "missing prompt_revision"):
             core.validate_result_file(recs, self.pack, "production", self.cal_ids)
+
+    def test_missing_baseline_prompt_revision_rejected(self):
+        recs = self._full_baseline()
+        del recs[0]["prompt_revision"]
+        with self.assertRaisesRegex(ValueError, "missing prompt_revision"):
+            core.validate_result_file(recs, self.pack, "baseline", self.cal_ids)
 
     def test_matching_prompt_revision_accepted(self):
         recs = self._full_baseline()

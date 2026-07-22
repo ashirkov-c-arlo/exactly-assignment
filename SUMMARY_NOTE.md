@@ -56,9 +56,8 @@ not a keyword; blocking-unknown stays 1 because **cal_005** persists.
 
 - **Run-to-run / cross-model variance**: cal_005 flips between human_review/reject/ship across runs
   and models; the reported before/after is one run — read it as observed, not definitive.
-- **Artifact provenance**: all 12 production records carry the current template revision; unstamped
-  production is rejected. It is not a per-record digest. Six baseline records remain legacy because
-  that template did not change.
+- **Artifact provenance**: all 18 baseline/production records carry their current template revision;
+  unstamped records are rejected. This is not a per-record digest.
 - **cal_005** (blocking-unknown false approval on flash-lite): the model grades the "comfortable"
   pose `supported` and ships where the label wants human_review. The check makes the judgement
   explicit and evidence-bound but cannot force a weak model to see ambiguity; an owner-labelled
@@ -93,7 +92,7 @@ not a keyword; blocking-unknown stays 1 because **cal_005** persists.
 ## Model & operations
 
 - **Model:** `google-gemini-3-1-flash-lite` (Runware, OpenAI-compatible; vision), `temperature=0`.
-- **Calls:** 20 (12 production + 6 baseline + 2 repair retries). **Runtime:** ~64 s.
+- **Calls:** 20 (12 production + 6 baseline + 2 repair retries). **Runtime:** ~66 s.
 - **Cost:** **$0.051** (186k prompt + 3.1k completion tokens), `cost_status: complete` — far under
   the USD 15 credit. Aggregated by code into `evaluation.json → operational`.
 
