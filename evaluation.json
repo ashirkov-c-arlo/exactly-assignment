@@ -1,0 +1,261 @@
+{
+  "prompt_versions": {
+    "baseline": "no subjective-requirement assessment",
+    "production": "+ structured subjective-requirement check (supported/ambiguous/failed) with ship-consistency validation"
+  },
+  "improvement": "model-graded subjective-requirement check + ship-consistency validation (motivated by FB-002)",
+  "metric_definitions": {
+    "serious_false_approvals": "ship where the label has a critical/major expected issue",
+    "unsafe_false_approvals": "ship where the label is reject/human_review/unsupported",
+    "blocking_unknown_false_approvals": "ship where the label expects a decision-critical unknown"
+  },
+  "before": {
+    "n_cases": 6,
+    "processing_success_rate": 1.0,
+    "primary_verdict_accuracy": 0.5,
+    "acceptable_verdict_accuracy": 0.5,
+    "serious_false_approvals": 2,
+    "unsafe_false_approvals": 3,
+    "blocking_unknown_false_approvals": 1,
+    "unsafe_case_detection_rate": 0.0,
+    "per_case": [
+      {
+        "asset_id": "cal_001",
+        "predicted_verdict": "ship",
+        "predicted_status": "completed",
+        "label_primary_verdict": "ship",
+        "label_acceptable_verdicts": [
+          "ship"
+        ],
+        "correct_primary": true,
+        "correct_acceptable": true,
+        "label_serious": false,
+        "label_unsafe": false,
+        "label_blocking_unknown": false,
+        "serious_false_approval": false,
+        "unsafe_false_approval": false,
+        "blocking_unknown_false_approval": false
+      },
+      {
+        "asset_id": "cal_002",
+        "predicted_verdict": "ship",
+        "predicted_status": "completed",
+        "label_primary_verdict": "reject",
+        "label_acceptable_verdicts": [
+          "reject"
+        ],
+        "correct_primary": false,
+        "correct_acceptable": false,
+        "label_serious": true,
+        "label_unsafe": true,
+        "label_blocking_unknown": false,
+        "serious_false_approval": true,
+        "unsafe_false_approval": true,
+        "blocking_unknown_false_approval": false
+      },
+      {
+        "asset_id": "cal_003",
+        "predicted_verdict": "ship",
+        "predicted_status": "completed",
+        "label_primary_verdict": "reject",
+        "label_acceptable_verdicts": [
+          "reject"
+        ],
+        "correct_primary": false,
+        "correct_acceptable": false,
+        "label_serious": true,
+        "label_unsafe": true,
+        "label_blocking_unknown": false,
+        "serious_false_approval": true,
+        "unsafe_false_approval": true,
+        "blocking_unknown_false_approval": false
+      },
+      {
+        "asset_id": "cal_004",
+        "predicted_verdict": "ship",
+        "predicted_status": "completed",
+        "label_primary_verdict": "ship",
+        "label_acceptable_verdicts": [
+          "ship"
+        ],
+        "correct_primary": true,
+        "correct_acceptable": true,
+        "label_serious": false,
+        "label_unsafe": false,
+        "label_blocking_unknown": false,
+        "serious_false_approval": false,
+        "unsafe_false_approval": false,
+        "blocking_unknown_false_approval": false
+      },
+      {
+        "asset_id": "cal_005",
+        "predicted_verdict": "ship",
+        "predicted_status": "completed",
+        "label_primary_verdict": "human_review",
+        "label_acceptable_verdicts": [
+          "human_review",
+          "reject"
+        ],
+        "correct_primary": false,
+        "correct_acceptable": false,
+        "label_serious": false,
+        "label_unsafe": true,
+        "label_blocking_unknown": true,
+        "serious_false_approval": false,
+        "unsafe_false_approval": true,
+        "blocking_unknown_false_approval": true
+      },
+      {
+        "asset_id": "cal_006",
+        "predicted_verdict": "ship",
+        "predicted_status": "completed",
+        "label_primary_verdict": "ship",
+        "label_acceptable_verdicts": [
+          "ship"
+        ],
+        "correct_primary": true,
+        "correct_acceptable": true,
+        "label_serious": false,
+        "label_unsafe": false,
+        "label_blocking_unknown": false,
+        "serious_false_approval": false,
+        "unsafe_false_approval": false,
+        "blocking_unknown_false_approval": false
+      }
+    ]
+  },
+  "after": {
+    "n_cases": 6,
+    "processing_success_rate": 1.0,
+    "primary_verdict_accuracy": 0.667,
+    "acceptable_verdict_accuracy": 0.667,
+    "serious_false_approvals": 1,
+    "unsafe_false_approvals": 2,
+    "blocking_unknown_false_approvals": 1,
+    "unsafe_case_detection_rate": 0.333,
+    "per_case": [
+      {
+        "asset_id": "cal_001",
+        "predicted_verdict": "ship",
+        "predicted_status": "completed",
+        "label_primary_verdict": "ship",
+        "label_acceptable_verdicts": [
+          "ship"
+        ],
+        "correct_primary": true,
+        "correct_acceptable": true,
+        "label_serious": false,
+        "label_unsafe": false,
+        "label_blocking_unknown": false,
+        "serious_false_approval": false,
+        "unsafe_false_approval": false,
+        "blocking_unknown_false_approval": false
+      },
+      {
+        "asset_id": "cal_002",
+        "predicted_verdict": "ship",
+        "predicted_status": "completed",
+        "label_primary_verdict": "reject",
+        "label_acceptable_verdicts": [
+          "reject"
+        ],
+        "correct_primary": false,
+        "correct_acceptable": false,
+        "label_serious": true,
+        "label_unsafe": true,
+        "label_blocking_unknown": false,
+        "serious_false_approval": true,
+        "unsafe_false_approval": true,
+        "blocking_unknown_false_approval": false
+      },
+      {
+        "asset_id": "cal_003",
+        "predicted_verdict": "reject",
+        "predicted_status": "completed",
+        "label_primary_verdict": "reject",
+        "label_acceptable_verdicts": [
+          "reject"
+        ],
+        "correct_primary": true,
+        "correct_acceptable": true,
+        "label_serious": true,
+        "label_unsafe": true,
+        "label_blocking_unknown": false,
+        "serious_false_approval": false,
+        "unsafe_false_approval": false,
+        "blocking_unknown_false_approval": false
+      },
+      {
+        "asset_id": "cal_004",
+        "predicted_verdict": "ship",
+        "predicted_status": "completed",
+        "label_primary_verdict": "ship",
+        "label_acceptable_verdicts": [
+          "ship"
+        ],
+        "correct_primary": true,
+        "correct_acceptable": true,
+        "label_serious": false,
+        "label_unsafe": false,
+        "label_blocking_unknown": false,
+        "serious_false_approval": false,
+        "unsafe_false_approval": false,
+        "blocking_unknown_false_approval": false
+      },
+      {
+        "asset_id": "cal_005",
+        "predicted_verdict": "ship",
+        "predicted_status": "completed",
+        "label_primary_verdict": "human_review",
+        "label_acceptable_verdicts": [
+          "human_review",
+          "reject"
+        ],
+        "correct_primary": false,
+        "correct_acceptable": false,
+        "label_serious": false,
+        "label_unsafe": true,
+        "label_blocking_unknown": true,
+        "serious_false_approval": false,
+        "unsafe_false_approval": true,
+        "blocking_unknown_false_approval": true
+      },
+      {
+        "asset_id": "cal_006",
+        "predicted_verdict": "ship",
+        "predicted_status": "completed",
+        "label_primary_verdict": "ship",
+        "label_acceptable_verdicts": [
+          "ship"
+        ],
+        "correct_primary": true,
+        "correct_acceptable": true,
+        "label_serious": false,
+        "label_unsafe": false,
+        "label_blocking_unknown": false,
+        "serious_false_approval": false,
+        "unsafe_false_approval": false,
+        "blocking_unknown_false_approval": false
+      }
+    ]
+  },
+  "deltas": {
+    "processing_success_rate": 0.0,
+    "primary_verdict_accuracy": 0.167,
+    "acceptable_verdict_accuracy": 0.167,
+    "serious_false_approvals": -1,
+    "unsafe_false_approvals": -1,
+    "blocking_unknown_false_approvals": 0
+  },
+  "regressions": [],
+  "operational": {
+    "model": "google-gemini-3-1-flash-lite",
+    "total_calls": 19,
+    "total_retries": 1,
+    "total_prompt_tokens": 176614,
+    "total_completion_tokens": 2899,
+    "runtime_s": 63.352,
+    "cost_usd": 0.048502,
+    "cost_status": "complete"
+  }
+}
