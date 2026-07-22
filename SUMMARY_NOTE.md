@@ -56,10 +56,9 @@ not a keyword; blocking-unknown stays 1 because **cal_005** persists.
 
 - **Run-to-run / cross-model variance**: cal_005 flips between human_review/reject/ship across runs
   and models; the reported before/after is one run — read it as observed, not definitive.
-- **Artifact provenance**: records now carry a `prompt_revision` hash so a stale artifact is
-  detectable, but the committed `reviews.jsonl` predates revisioning (unstamped, treated as legacy).
-  A fresh 12-call production run would stamp it and re-verify under the current prompt; deferred
-  (Runware credit nearly exhausted).
+- **Artifact provenance**: all 12 production records carry the current template revision; unstamped
+  production is rejected. It is not a per-record digest. Six baseline records remain legacy because
+  that template did not change.
 - **cal_005** (blocking-unknown false approval on flash-lite): the model grades the "comfortable"
   pose `supported` and ships where the label wants human_review. The check makes the judgement
   explicit and evidence-bound but cannot force a weak model to see ambiguity; an owner-labelled
@@ -79,7 +78,8 @@ not a keyword; blocking-unknown stays 1 because **cal_005** persists.
 - **Hardened validation**: schema + verdict precedence (reject > unsupported > human_review > ship);
   every unverifiable check needs category/decision_critical/unique source_ids; `ship`/`reject` need
   null `blocking_reason`; a decision-critical external requirement can never ship; required copy and
-  subjective requirements can't be silently dropped. One bounded repair retry, else `provider_error`.
+  subjective requirements can't be silently dropped; `failed` needs one major/critical issue citing
+  POSE-01 and the brief. One bounded repair retry, else `provider_error`.
 - **Failure-safe** sequential batch, per-record isolation, flush per line; images never deduplicated.
 - **Cost** from token usage × the model's published price; unavailable pricing/usage → `null`
   (`cost_status`), never faked as $0. `max_tokens=8192` with `finish_reason` truncation detection
@@ -93,8 +93,8 @@ not a keyword; blocking-unknown stays 1 because **cal_005** persists.
 ## Model & operations
 
 - **Model:** `google-gemini-3-1-flash-lite` (Runware, OpenAI-compatible; vision), `temperature=0`.
-- **Calls:** 19 (12 production + 6 baseline + 1 repair retry). **Runtime:** ~63 s.
-- **Cost:** **$0.049** (177k prompt + 2.9k completion tokens), `cost_status: complete` — far under
+- **Calls:** 20 (12 production + 6 baseline + 2 repair retries). **Runtime:** ~64 s.
+- **Cost:** **$0.051** (186k prompt + 3.1k completion tokens), `cost_status: complete` — far under
   the USD 15 credit. Aggregated by code into `evaluation.json → operational`.
 
 ## Most useful next improvement

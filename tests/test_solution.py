@@ -94,6 +94,9 @@ class TestBatchFailureSafety(unittest.TestCase):
             records = core.run_batch(pack, flaky, Path(d) / "reviews.jsonl", prompt_version="production")
 
         self.assertEqual([r["asset_id"] for r in records], [b["asset_id"] for b in pack.briefs])
+        self.assertEqual({r["processing_status"] for r in records}, {"completed", "provider_error"})
+        self.assertTrue(all(r["prompt_revision"] == core.PROMPT_REVISIONS["production"]
+                            for r in records))
         for r in records:
             if r["asset_id"] == target:
                 self.assertEqual(r["processing_status"], "provider_error")
@@ -188,6 +191,16 @@ class TestSemanticValidation(unittest.TestCase):
                                                "source_ids": ["POSE-01", "POSE-01"]}])
         with self.assertRaises(core.ValidationError):
             self._validate(rec)
+
+    def test_malformed_check_category_types_raise_validationerror(self):
+        for category in ({}, []):
+            with self.subTest(category=category):
+                rec = self._base("human_review", blocking_reason="b",
+                                 unverifiable_checks=[{"check_id": "POSE-01", "category": category,
+                                                       "reason": "r", "decision_critical": True,
+                                                       "source_ids": ["brief:cal_001"]}])
+                with self.assertRaises(core.ValidationError):  # not unhashable-value TypeError
+                    self._validate(rec)
 
     def test_precedence_human_review_with_serious_issue_rejected(self):
         with self.assertRaises(core.ValidationError):
@@ -297,10 +310,11 @@ class TestSubjectiveRequirement(unittest.TestCase):
         with self.assertRaises(core.ValidationError):
             self._v(self._rec("reject", subjective_requirements=self._subj("failed")))
 
-    def test_failed_with_major_issue_reject_ok(self):
+    def test_failed_with_grounded_major_issue_reject_ok(self):
         rec = self._rec("reject", subjective_requirements=self._subj("failed", source_ids=("POSE-01", "brief:cal_005")),
                         issues=[{"severity": "major", "observation": "stiff pose",
-                                 "source_ids": ["POSE-01"], "why_it_matters": "y", "suggested_fix": "z"}])
+                                 "source_ids": ["POSE-01", "brief:cal_005"],
+                                 "why_it_matters": "y", "suggested_fix": "z"}])
         self._v(rec)  # must not raise
 
     def test_failed_without_pose_grounding_rejected(self):
@@ -338,6 +352,16 @@ class TestSubjectiveRequirement(unittest.TestCase):
         rec = self._rec("reject", subjective_requirements=self._subj("failed", source_ids=("POSE-01", "brief:cal_005")),
                         issues=[{"severity": "major", "observation": "gradient shading",
                                  "source_ids": ["STYLE-01"], "why_it_matters": "y", "suggested_fix": "z"}])
+        with self.assertRaises(core.ValidationError):
+            self._v(rec)
+
+    def test_failed_with_unrelated_major_and_minor_pose_rejected(self):
+        rec = self._rec("reject", subjective_requirements=self._subj("failed", source_ids=("POSE-01", "brief:cal_005")),
+                        issues=[{"severity": "major", "observation": "gradient shading",
+                                 "source_ids": ["STYLE-01"], "why_it_matters": "y", "suggested_fix": "z"},
+                                {"severity": "minor", "observation": "pose is ambiguous",
+                                 "source_ids": ["POSE-01", "brief:cal_005"],
+                                 "why_it_matters": "y", "suggested_fix": "z"}])
         with self.assertRaises(core.ValidationError):
             self._v(rec)
 
@@ -407,6 +431,9 @@ class TestInputErrors(unittest.TestCase):
         self.assertEqual(by_id["good_2"]["processing_status"], "completed")
         self.assertTrue(any(r["processing_status"] == "input_error"
                             and r["asset_id"].startswith("malformed_line_") for r in records))
+        self.assertEqual({r["processing_status"] for r in records}, {"completed", "input_error"})
+        self.assertTrue(all(r["prompt_revision"] == core.PROMPT_REVISIONS["production"]
+                            for r in records))
 
 
 class TestFailFastLoading(unittest.TestCase):
@@ -489,10 +516,15 @@ class TestReusedFileValidation(unittest.TestCase):
         with self.assertRaises(ValueError):
             core.validate_result_file(recs, self.pack, "baseline", self.cal_ids)
 
+    def test_missing_production_prompt_revision_rejected(self):
+        recs = [self._rec(a, pv="production") for a in self.cal_ids]
+        with self.assertRaisesRegex(ValueError, "missing prompt_revision"):
+            core.validate_result_file(recs, self.pack, "production", self.cal_ids)
+
     def test_matching_prompt_revision_accepted(self):
         recs = self._full_baseline()
         for r in recs:
-            r["prompt_revision"] = core.PROMPT_REVISION
+            r["prompt_revision"] = core.PROMPT_REVISIONS["baseline"]
         core.validate_result_file(recs, self.pack, "baseline", self.cal_ids)  # must not raise
 
 

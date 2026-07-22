@@ -386,20 +386,26 @@ _SUBJECTIVE_INSTRUCTION = (
     "come from ALLOWED_SOURCE_IDS (use POSE-01 and brief:CURRENT_ASSET_ID). Grade it only from "
     "visible pose/furniture evidence. Ship ONLY if status is \"supported\" with concrete "
     "visible_evidence; if \"ambiguous\" choose human_review UNLESS an independent major issue or "
-    "external blocker already forces reject/unsupported; if \"failed\" cite POSE-01 and "
-    "brief:CURRENT_ASSET_ID, record a major issue, and reject."
+    "external blocker already forces reject/unsupported; if \"failed\", reject and record one "
+    "major/critical issue citing both POSE-01 and brief:CURRENT_ASSET_ID."
 )
 _NO_SUBJECTIVE_INSTRUCTION = (
     "\n- Do NOT include a subjective_requirements field for this brief."
 )
 
-# Short hash of the exact prompt text. Stamped into every generated record as
-# `prompt_revision` so a reused artifact produced by a different prompt is detectable
-# (plain `prompt_version` can't tell revisions apart).
-PROMPT_REVISION = hashlib.sha256(
-    "\x00".join([_SYSTEM_PROMPT, _USER_PROMPT, _SUBJECTIVE_INSTRUCTION,
-                 _NO_SUBJECTIVE_INSTRUCTION]).encode("utf-8")
-).hexdigest()[:12]
+
+def _prompt_hash(*parts: str) -> str:
+    return hashlib.sha256("\x00".join(parts).encode("utf-8")).hexdigest()[:12]
+
+
+# Template revisions, not digests of rendered per-record messages, context, or attachments.
+# Baseline excludes production-only subjective instructions, so changing those does not
+# invalidate a genuinely unchanged baseline template.
+PROMPT_REVISIONS = {
+    "baseline": _prompt_hash(_SYSTEM_PROMPT, _USER_PROMPT),
+    "production": _prompt_hash(_SYSTEM_PROMPT, _USER_PROMPT, _SUBJECTIVE_INSTRUCTION,
+                               _NO_SUBJECTIVE_INSTRUCTION),
+}
 
 
 def _image_part(data: bytes) -> dict:
@@ -595,14 +601,15 @@ def _semantic_validate(record: dict, brief: dict, allowed: set[str], signals: di
                 if st == "failed":
                     if verdict != "reject":
                         errors.append("a failed subjective requirement must resolve to reject")
-                    elif not serious:
-                        errors.append("a failed subjective requirement must be backed by a major/critical issue")
                     if not {"POSE-01", f"brief:{aid}"} <= set(str_ids):
                         errors.append("a failed subjective requirement must cite POSE-01 and the current brief")
-                    # The failure must be tied to a concrete pose observation, not carried by an
-                    # unrelated serious issue (e.g. a color/style defect on its own).
-                    if not any("POSE-01" in it.get("source_ids", []) for it in issues):
-                        errors.append("a failed subjective requirement must be evidenced by a POSE-01 issue")
+                    if not any(
+                        it.get("severity") in {"critical", "major"}
+                        and {"POSE-01", f"brief:{aid}"} <= set(it.get("source_ids", []))
+                        for it in issues
+                    ):
+                        errors.append("a failed subjective requirement must be backed by one major/critical "
+                                      "issue citing POSE-01 and the current brief")
         elif "subjective_requirements" in record:
             errors.append("subjective_requirements must be absent when the brief requests no subjective quality")
 
@@ -640,12 +647,14 @@ def validate_result_file(records: list[dict], pack: "TaskPack", expected_prompt_
             raise ValueError(f"record {aid!r} missing prompt_version")
         if pv != expected_prompt_version:
             raise ValueError(f"record {aid!r} prompt_version {pv!r}, expected {expected_prompt_version!r}")
-        # Detect a stale artifact produced by a different prompt (enforced when the record
-        # carries a revision; pre-revisioning files are treated as legacy).
         rev = r.get("prompt_revision")
-        if rev is not None and rev != PROMPT_REVISION:
-            raise ValueError(f"record {aid!r} prompt_revision {rev!r} != current {PROMPT_REVISION!r} "
-                             f"(stale artifact — regenerate with the current prompt)")
+        if rev is None and expected_prompt_version == "production":
+            raise ValueError(f"record {aid!r} missing prompt_revision; production artifacts must "
+                             f"be regenerated with the current prompt")
+        expected_revision = PROMPT_REVISIONS[expected_prompt_version]
+        if rev is not None and rev != expected_revision:
+            raise ValueError(f"record {aid!r} prompt_revision {rev!r} != current "
+                             f"{expected_revision!r} (stale artifact — regenerate)")
         if r.get("processing_status") == "completed":
             if not r.get("model"):
                 raise ValueError(f"completed record {aid!r} missing model")
@@ -772,7 +781,7 @@ def review_asset(brand_sources: dict, brief: dict, image: bytes, call_model: Mod
         else:
             record.update({
                 "prompt_version": brand_sources["prompt_version"],
-                "prompt_revision": PROMPT_REVISION,
+                "prompt_revision": PROMPT_REVISIONS[brand_sources["prompt_version"]],
                 "model": model_name,
                 "calls": calls,
                 "retries": retries,
@@ -785,7 +794,7 @@ def review_asset(brand_sources: dict, brief: dict, image: bytes, call_model: Mod
 
     return _failure_record(brief["asset_id"], "provider_error", last_error, meta={
         "prompt_version": brand_sources["prompt_version"],
-        "prompt_revision": PROMPT_REVISION,
+        "prompt_revision": PROMPT_REVISIONS[brand_sources["prompt_version"]],
         "model": model_name,
         "calls": calls,
         "retries": retries,
@@ -820,13 +829,13 @@ def run_batch(pack: TaskPack, call_model: ModelCall, output_path: str | Path,
             if "_error" in brief:
                 rec = _failure_record(brief["asset_id"], "input_error", brief["_error"],
                                       meta={"prompt_version": prompt_version,
-                                            "prompt_revision": PROMPT_REVISION})
+                                            "prompt_revision": PROMPT_REVISIONS[prompt_version]})
             else:
                 image, err = resolve_image(pack.root, brief["image_path"])
                 if err is not None:
                     rec = _failure_record(brief["asset_id"], "input_error", err,
                                           meta={"prompt_version": prompt_version,
-                                                "prompt_revision": PROMPT_REVISION})
+                                                "prompt_revision": PROMPT_REVISIONS[prompt_version]})
                 else:
                     brand_sources = build_brand_sources(pack, brief, prompt_version)
                     rec = review_asset(brand_sources, brief, image, call_model, pack.schema)

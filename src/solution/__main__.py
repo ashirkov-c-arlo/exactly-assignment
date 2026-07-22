@@ -92,7 +92,7 @@ def cmd_probe(args):
 
 
 def cmd_dump_prompt(args):
-    """Print the exact runtime prompt templates (single source of truth for the docs)."""
+    """Print the authoritative runtime prompt templates (record data is inserted later)."""
     def system(sub):
         return core._SYSTEM_PROMPT.format(
             subjective=sub, guide="{{ACTIVE_BRAND_GUIDE}}",
@@ -142,7 +142,7 @@ def main(argv=None):
     pr = sub.add_parser("probe", parents=[common], help="One minimal live request to verify access")
     pr.set_defaults(func=cmd_probe)
 
-    dp = sub.add_parser("dump-prompt", parents=[common], help="Print the exact runtime prompt templates")
+    dp = sub.add_parser("dump-prompt", parents=[common], help="Print the authoritative prompt templates")
     dp.set_defaults(func=cmd_dump_prompt)
 
     args = p.parse_args(argv)
