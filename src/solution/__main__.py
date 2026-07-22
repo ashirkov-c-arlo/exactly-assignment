@@ -46,6 +46,12 @@ def cmd_evaluate(args):
                                   prompt_version="baseline", asset_ids=cal_ids)
     baseline_model = core.validate_result_file(baseline, pack, "baseline", cal_ids)
 
+    # Fail before the (paid) production run if a reused baseline used a different model.
+    if not args.current_output and baseline_model and baseline_model != args.model:
+        sys.exit(f"error: reused baseline model {baseline_model!r} != --model {args.model!r}; "
+                 f"a production run would be wasted. Re-run baseline with --model {baseline_model!r}, "
+                 f"or pass --current-output from the same model.")
+
     if args.current_output:
         production = _load_records(args.current_output)
     else:
@@ -87,12 +93,17 @@ def cmd_probe(args):
 
 def cmd_dump_prompt(args):
     """Print the exact runtime prompt templates (single source of truth for the docs)."""
-    system = core._SYSTEM_PROMPT.format(
-        subjective=core._SUBJECTIVE_INSTRUCTION,
-        guide="{{ACTIVE_BRAND_GUIDE}}", clarifications="{{APPROVED_CLARIFICATIONS_JSON}}",
-        ref_descriptions="{{APPROVED_REFERENCE_DESCRIPTIONS}}", allowed_ids="{{ALLOWED_SOURCE_IDS_JSON}}")
-    print("=== SYSTEM PROMPT (production; baseline omits the subjective_requirements bullet) ===\n")
-    print(system)
+    def system(sub):
+        return core._SYSTEM_PROMPT.format(
+            subjective=sub, guide="{{ACTIVE_BRAND_GUIDE}}",
+            clarifications="{{APPROVED_CLARIFICATIONS_JSON}}",
+            ref_descriptions="{{APPROVED_REFERENCE_DESCRIPTIONS}}",
+            allowed_ids="{{ALLOWED_SOURCE_IDS_JSON}}")
+    print("=== SYSTEM PROMPT — subjective brief (example term 'comfortably') ===\n")
+    print(system(core._SUBJECTIVE_INSTRUCTION.format(term="comfortably")))
+    print("\n=== SYSTEM PROMPT — non-subjective / baseline differ ONLY in this line ===")
+    print(f"  production, non-subjective brief:{core._NO_SUBJECTIVE_INSTRUCTION}")
+    print("  baseline (any brief): (line omitted entirely)")
     print("\n=== USER PROMPT ===\n")
     print(core._USER_PROMPT)
 

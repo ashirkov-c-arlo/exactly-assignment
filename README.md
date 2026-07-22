@@ -94,7 +94,7 @@ disagreement is visible there and explained (without altering the label) in `SUM
 uv run --locked python -m unittest discover -s tests
 ```
 
-Offline only — the model is always injected. 36 tests cover partial-batch failure isolation,
+Offline only — the model is always injected. 56 tests cover partial-batch failure isolation,
 truncation and unavailable-cost handling, the hardened semantic guardrails (missing/ non-unique
 check fields, verdict precedence, external-authority), the structured subjective-requirement check,
 the three false-approval metrics, reused-file validation (exact id sets / required fields / single

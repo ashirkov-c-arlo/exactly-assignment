@@ -230,10 +230,11 @@ def build_brand_sources(pack: TaskPack, brief: dict, prompt_version: str) -> dic
     asset_id = brief["asset_id"]
     brief_source_id = f"brief:{asset_id}"
 
-    # Relevant example-only feedback: about this asset or an approved reference.
+    # Relevant example-only feedback: about this asset or an approved reference. Exclude
+    # anything superseded (by link OR by policy_effect) so obsolete feedback never re-enters.
     relevant_feedback = [
         f for f in pack.feedback
-        if not f.get("superseded_by")
+        if not f.get("superseded_by") and f.get("policy_effect") != "superseded"
         and (f.get("asset_id") == asset_id or f.get("asset_id") in pack.reference_ids)
     ]
 
@@ -383,10 +384,12 @@ _SUBJECTIVE_INSTRUCTION = (
     "\"supported\"/\"ambiguous\"/\"failed\", visible_evidence cites concrete pixels, and source_ids "
     "come from ALLOWED_SOURCE_IDS (use POSE-01 and brief:CURRENT_ASSET_ID). Grade it only from "
     "visible pose/furniture evidence. Ship ONLY if status is \"supported\" with concrete "
-    "visible_evidence; if \"ambiguous\" choose human_review; if \"failed\" record a major issue and reject."
+    "visible_evidence; if \"ambiguous\" choose human_review UNLESS an independent major issue or "
+    "external blocker already forces reject/unsupported; if \"failed\" cite POSE-01 and "
+    "brief:CURRENT_ASSET_ID, record a major issue, and reject."
 )
 _NO_SUBJECTIVE_INSTRUCTION = (
-    "\n- CURRENT_BRIEF requests no subjective quality; do NOT include a subjective_requirements field."
+    "\n- Do NOT include a subjective_requirements field for this brief."
 )
 
 
@@ -460,12 +463,16 @@ def _semantic_validate(record: dict, brief: dict, allowed: set[str], signals: di
     if record.get("processing_status") != "completed":
         errors.append("model output must have processing_status 'completed'")
 
-    # Every cited source id must be in the allow-list.
+    # Every cited source id must be in the allow-list. source_ids on unverifiable_checks are
+    # not schema-typed, so collect defensively (ignore non-strings here) and let the
+    # field-discipline loop report malformed ones — never crash on bad input.
     cited: set[str] = set()
     for it in issues:
-        cited |= set(it.get("source_ids", []))
+        cited |= {s for s in it.get("source_ids", []) if isinstance(s, str)}
     for ck in checks:
-        cited |= set(ck.get("source_ids", []))
+        ids = ck.get("source_ids")
+        if isinstance(ids, list):
+            cited |= {s for s in ids if isinstance(s, str)}
     unknown = sorted(cited - allowed)
     if unknown:
         errors.append(f"unknown source_ids not in allow-list: {unknown}")
@@ -480,8 +487,8 @@ def _semantic_validate(record: dict, brief: dict, allowed: set[str], signals: di
         if not isinstance(ck.get("decision_critical"), bool):
             errors.append(f"unverifiable_checks[{i}].decision_critical must be a boolean")
         sids = ck.get("source_ids")
-        if not isinstance(sids, list) or not sids:
-            errors.append(f"unverifiable_checks[{i}].source_ids must be a non-empty list")
+        if not isinstance(sids, list) or not sids or not all(isinstance(s, str) for s in sids):
+            errors.append(f"unverifiable_checks[{i}].source_ids must be a non-empty list of strings")
         elif len(set(sids)) != len(sids):
             errors.append(f"unverifiable_checks[{i}].source_ids must be unique")
 
@@ -541,9 +548,11 @@ def _semantic_validate(record: dict, brief: dict, allowed: set[str], signals: di
         if not (mentioned or copy_issue or readability):
             errors.append("required copy present in brief but not addressed in summary/issues/checks")
 
-    # Structured subjective-requirement check (production only). We validate the array itself
-    # (shape, one entry, matching brief word, allow-listed unique source_ids) and enforce
-    # verdict-consistency, so the model cannot invent a requirement or hide a failed one.
+    # Structured subjective-requirement check (production only). Validate the array itself
+    # (types, one entry, matching brief word, allow-listed unique source_ids) and enforce
+    # verdict-consistency WITHOUT overriding the reject > unsupported > human_review > ship
+    # precedence: an ambiguous quality does not force human_review when an independent serious
+    # issue (reject) or external blocker (unsupported) already applies.
     if prompt_version == "production":
         if subj_term:
             if not isinstance(subj_reqs, list) or len(subj_reqs) != 1 or not isinstance(subj_reqs[0], dict):
@@ -551,27 +560,37 @@ def _semantic_validate(record: dict, brief: dict, allowed: set[str], signals: di
             else:
                 item = subj_reqs[0]
                 st = item.get("status")
-                if (item.get("requirement") or "").strip().lower() != subj_term.lower():
+                req = item.get("requirement")
+                ev = item.get("visible_evidence")
+                sids = item.get("source_ids")
+                str_ids = [s for s in sids if isinstance(s, str)] if isinstance(sids, list) else []
+                if not isinstance(req, str) or req.strip().lower() != subj_term.lower():
                     errors.append(f"subjective_requirements.requirement must equal the brief term '{subj_term}'")
                 if st not in {"supported", "ambiguous", "failed"}:
                     errors.append("subjective_requirements.status must be supported/ambiguous/failed")
-                if not (item.get("visible_evidence") or "").strip():
-                    errors.append("subjective_requirements.visible_evidence must be non-empty")
-                sids = item.get("source_ids")
-                if not isinstance(sids, list) or not sids:
-                    errors.append("subjective_requirements.source_ids must be a non-empty list")
+                if not isinstance(ev, str) or not ev.strip():
+                    errors.append("subjective_requirements.visible_evidence must be a non-empty string")
+                if not isinstance(sids, list) or not sids or len(str_ids) != len(sids):
+                    errors.append("subjective_requirements.source_ids must be a non-empty list of strings")
                 elif len(set(sids)) != len(sids):
                     errors.append("subjective_requirements.source_ids must be unique")
                 elif set(sids) - allowed:
                     errors.append(f"subjective_requirements.source_ids not in allow-list: {sorted(set(sids) - allowed)}")
+                # ship needs 'supported'; 'failed' must resolve to reject grounded on the pose
+                # rule + this brief and backed by a serious issue. 'ambiguous' does not ship,
+                # and may resolve to human_review (see the human_review branch) or, when a
+                # higher-priority blocker exists, to reject/unsupported.
                 if verdict == "ship" and st != "supported":
                     errors.append("ship requires the subjective requirement status 'supported'")
-                if st == "ambiguous" and verdict != "human_review":
-                    errors.append("an ambiguous subjective requirement must be human_review")
-                if st == "failed" and (verdict != "reject" or not serious):
-                    errors.append("a failed subjective requirement must be reject backed by a major/critical issue")
+                if st == "failed":
+                    if verdict != "reject":
+                        errors.append("a failed subjective requirement must resolve to reject")
+                    elif not serious:
+                        errors.append("a failed subjective requirement must be backed by a major/critical issue")
+                    if not {"POSE-01", f"brief:{aid}"} <= set(str_ids):
+                        errors.append("a failed subjective requirement must cite POSE-01 and the current brief")
         elif subj_reqs:
-            errors.append("subjective_requirements present but the brief requests no subjective quality")
+            errors.append("subjective_requirements present but no subjective quality was detected in the brief signals")
 
     if errors:
         raise ValidationError("; ".join(errors))
@@ -908,6 +927,11 @@ def evaluate(pack: TaskPack, baseline_records: list[dict],
     all_records = baseline_records + production_records
     known_costs = [float(r["cost_usd"]) for r in all_records if r.get("cost_usd") is not None]
     cost_unknown = any(r.get("cost_usd") is None for r in all_records)
+    if not known_costs:
+        cost_usd, cost_status = None, "unavailable"  # never fake $0 when nothing is known
+    else:
+        cost_usd = round(sum(known_costs), 6)
+        cost_status = "partial_unavailable" if cost_unknown else "complete"
     operational = {
         "model": next((r.get("model") for r in all_records if r.get("model")), None),
         "total_calls": sum(int(r.get("calls", 0)) for r in all_records),
@@ -915,8 +939,8 @@ def evaluate(pack: TaskPack, baseline_records: list[dict],
         "total_prompt_tokens": sum(int(r.get("prompt_tokens", 0)) for r in all_records),
         "total_completion_tokens": sum(int(r.get("completion_tokens", 0)) for r in all_records),
         "runtime_s": round(sum(float(r.get("latency_s", 0)) for r in all_records), 3),
-        "cost_usd": round(sum(known_costs), 6),
-        "cost_status": "partial_unavailable" if cost_unknown else "complete",
+        "cost_usd": cost_usd,
+        "cost_status": cost_status,
     }
 
     return {
@@ -973,8 +997,8 @@ def _fetch_pricing(client, model: str) -> tuple[float, float] | None:
             data = m.model_dump()
             if data.get("id") == model:
                 p = data.get("pricing") or {}
-                if "prompt" not in p and "completion" not in p:
-                    return None  # model listed but no usable price
+                if "prompt" not in p or "completion" not in p:
+                    return None  # need both keys to compute cost; otherwise unavailable
                 return float(p.get("prompt", 0) or 0), float(p.get("completion", 0) or 0)
     except Exception:  # noqa: BLE001 - pricing is best-effort
         return None

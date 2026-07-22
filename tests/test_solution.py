@@ -298,14 +298,35 @@ class TestSubjectiveRequirement(unittest.TestCase):
             self._v(self._rec("reject", subjective_requirements=self._subj("failed")))
 
     def test_failed_with_major_issue_reject_ok(self):
-        rec = self._rec("reject", subjective_requirements=self._subj("failed"),
+        rec = self._rec("reject", subjective_requirements=self._subj("failed", source_ids=("POSE-01", "brief:cal_005")),
                         issues=[{"severity": "major", "observation": "stiff pose",
                                  "source_ids": ["POSE-01"], "why_it_matters": "y", "suggested_fix": "z"}])
         self._v(rec)  # must not raise
 
+    def test_failed_without_pose_grounding_rejected(self):
+        # 'failed' must cite POSE-01 + the brief, not lean on an unrelated major issue.
+        rec = self._rec("reject", subjective_requirements=self._subj("failed", source_ids=("brief:cal_005",)),
+                        issues=[{"severity": "major", "observation": "red legs",
+                                 "source_ids": ["COLOR-02"], "why_it_matters": "y", "suggested_fix": "z"}])
+        with self.assertRaises(core.ValidationError):
+            self._v(rec)
+
     def test_malformed_non_list_rejected(self):
         with self.assertRaises(core.ValidationError):
             self._v(self._rec("ship", subjective_requirements={"requirement": "comfortably"}))
+
+    def test_ambiguous_with_independent_reject_allowed(self):
+        # Precedence: an independent major issue -> reject wins; ambiguous must not force human_review.
+        rec = self._rec("reject", subjective_requirements=self._subj("ambiguous"),
+                        issues=[{"severity": "major", "observation": "red legs read as skin",
+                                 "source_ids": ["COLOR-02"], "why_it_matters": "y", "suggested_fix": "z"}])
+        self._v(rec)  # must not raise
+
+    def test_malformed_field_types_raise_validationerror_not_exception(self):
+        rec = self._rec("ship", subjective_requirements=[{"requirement": 123, "status": "supported",
+                                                          "visible_evidence": 456, "source_ids": [{}]}])
+        with self.assertRaises(core.ValidationError):  # not AttributeError/TypeError
+            self._v(rec)
 
 
 class TestMetrics(unittest.TestCase):
@@ -482,7 +503,7 @@ class TestRequestAssemblyAndPromptHygiene(unittest.TestCase):
         nb = {"asset_id": "review_001", "image_path": "x", "request": "Show a worker waving hello."}
         nb_sys = core.build_messages(core.build_brand_sources(self.pack, nb, "production"),
                                      nb, img, core.brief_signals(nb["request"]))[0]["content"]
-        self.assertIn("do NOT include a subjective_requirements", nb_sys)
+        self.assertIn("Do NOT include a subjective_requirements", nb_sys)
         # Subjective brief: names the exact brief word.
         sb = {"asset_id": "cal_005", "image_path": "x",
               "request": "Show a woman sitting comfortably on a sofa and checking her phone."}
@@ -514,6 +535,11 @@ class TestModelBackend(unittest.TestCase):
 
     def test_fetch_pricing_missing_keys_returns_none(self):
         client = _FakeClient([_FakeModel({"id": "mdl", "pricing": {}})])
+        self.assertIsNone(core._fetch_pricing(client, "mdl"))
+
+    def test_fetch_pricing_partial_keys_returns_none(self):
+        # only one price key present -> unavailable (never fake completion=0)
+        client = _FakeClient([_FakeModel({"id": "mdl", "pricing": {"prompt": "0.1"}})])
         self.assertIsNone(core._fetch_pricing(client, "mdl"))
 
     def test_fetch_pricing_model_absent_returns_none(self):
