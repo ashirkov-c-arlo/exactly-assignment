@@ -67,12 +67,17 @@ def cmd_evaluate(args):
     report = core.evaluate(pack, baseline, production)
     Path(args.output).write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
     d = report["deltas"]
+    gate = report["acceptance_gate"]
     print(f"Wrote {args.output}. acceptable accuracy "
           f"{report['before']['acceptable_verdict_accuracy']} -> "
           f"{report['after']['acceptable_verdict_accuracy']} "
           f"(delta {d['acceptable_verdict_accuracy']}); "
           f"unsafe false approvals {report['before']['unsafe_false_approvals']} -> "
-          f"{report['after']['unsafe_false_approvals']}.")
+          f"{report['after']['unsafe_false_approvals']}; "
+          f"acceptance={'PASS' if gate['passed'] else 'FAIL'}.")
+    if not gate["passed"]:
+        failed = ", ".join(name for name, passed in gate["checks"].items() if not passed)
+        sys.exit(f"error: production failed acceptance gate for {gate['model']!r}: {failed}")
 
 
 def cmd_probe(args):
@@ -93,19 +98,20 @@ def cmd_probe(args):
 
 def cmd_dump_prompt(args):
     """Print the authoritative runtime prompt templates (record data is inserted later)."""
-    def system(sub):
+    def system(addition):
         return core._SYSTEM_PROMPT.format(
-            subjective=sub, guide="{{ACTIVE_BRAND_GUIDE}}",
+            subjective=addition, guide="{{ACTIVE_BRAND_GUIDE}}",
             clarifications="{{APPROVED_CLARIFICATIONS_JSON}}",
             ref_descriptions="{{APPROVED_REFERENCE_DESCRIPTIONS}}",
             allowed_ids="{{ALLOWED_SOURCE_IDS_JSON}}")
-    print("=== SYSTEM PROMPT — subjective brief (example term 'comfortably') ===\n")
-    print(system(core._SUBJECTIVE_INSTRUCTION.format(term="comfortably")))
-    print("\n=== SYSTEM PROMPT — non-subjective / baseline differ ONLY in this line ===")
-    print(f"  production, non-subjective brief:{core._NO_SUBJECTIVE_INSTRUCTION}")
-    print("  baseline (any brief): (line omitted entirely)")
+    print("=== SYSTEM PROMPT — production ===\n")
+    print(system(core._COLOR_CLOTHING_INSTRUCTION))
+    print("\n=== SYSTEM PROMPT — baseline (production instruction omitted) ===\n")
+    print(system(""))
     print("\n=== USER PROMPT ===\n")
     print(core._USER_PROMPT)
+    print("\n=== REPAIR PROMPT TEMPLATE ===\n")
+    print(core._REPAIR_TEMPLATE)
 
 
 def main(argv=None):
@@ -113,7 +119,6 @@ def main(argv=None):
     # matching the documented `... run --task-pack ... --model ...` interface.
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--task-pack", default="./bubble-task-pack")
-    # google-gemini-3-5-flash
     common.add_argument("--model", default="google-gemini-3-1-flash-lite",
                         help="Runware vision model id (default: google-gemini-3-1-flash-lite)")
     common.add_argument("--base-url", default="https://api.runware.ai/v1")
@@ -132,7 +137,8 @@ def main(argv=None):
 
     e = sub.add_parser("evaluate", parents=[common],
                        help="Before/after calibration metrics -> evaluation.json")
-    e.add_argument("--output", default="./evaluation.json")
+    e.add_argument("--output", required=True,
+                   help="Model-scoped report path; generated baseline/production use the same prefix")
     e.add_argument("--baseline-output", default=None,
                    help="Existing baseline predictions jsonl (skip the 6 baseline calls)")
     e.add_argument("--current-output", default=None,

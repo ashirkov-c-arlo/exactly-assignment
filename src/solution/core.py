@@ -201,25 +201,14 @@ def brief_signals(request: str) -> dict:
     m = re.search(r'(?:says|reads|labell?ed|titled|that says)\s*[:\-]?\s*["“](.+?)["”]',
                   request, flags=re.IGNORECASE)
     # STRONG external terms inherently need licensing/authority we cannot see (so they make
-    # the decision external); WEAK terms are context only. Subjective qualities can't be
-    # confirmed from pixels either.
+    # the decision external); WEAK terms are context only.
     strong = [t for t in ("licens", "copyright", "consent", "exclusiv", "authoriz", "authoris",
                           "provenance", "cleared", "royalty", "ownership") if t in low]
     weak = [t for t in ("owned", "worldwide use", "usage rights", "usage right", "approval") if t in low]
-    subjective = None
-    for stem in ("comfortab", "relax", "cozy", "at ease", "at-ease", "carefree"):
-        if stem in low:
-            if " " in stem or "-" in stem:
-                subjective = stem  # already a phrase; report as-is
-            else:  # report the brief's actual word (e.g. 'comfortably'), never the stem
-                w = re.search(r"\b\w*" + stem + r"\w*\b", request, re.IGNORECASE)
-                subjective = w.group(0) if w else stem
-            break
     return {
         "required_copy": m.group(1) if m else None,
         "external_authority_terms": sorted(set(strong) | set(weak)),
         "decision_critical_external_requirement": bool(strong),  # strong terms only
-        "subjective_quality": subjective,
     }
 
 
@@ -260,10 +249,9 @@ def build_brand_sources(pack: TaskPack, brief: dict, prompt_version: str) -> dic
 # Prompts (frozen baseline + one production version)
 # --------------------------------------------------------------------------- #
 
-# The baseline and production prompts differ ONLY by {subjective}: production asks the
-# model to grade any requested subjective quality (FB-002) as supported/ambiguous/failed
-# with visible evidence, which the pipeline then enforces for ship-consistency. Guide,
-# references, allow-list and every other rule are identical across the two versions.
+# The rendered baseline and production prompts differ ONLY at {subjective}: production inserts
+# one general color/clothing disambiguation rule motivated by FB-001. The placeholder name is
+# internal; baseline renders it empty. Guide, references, allow-list and all other rules match.
 _SYSTEM_PROMPT = """You are the Bubble Illustration Quality Gate. Review exactly ONE target illustration as a conservative aid to a human brand reviewer. Inspect pixels with a vision-capable model and return one grounded JSON object. Do not output Markdown or text outside JSON.
 
 TRUST AND SOURCE AUTHORITY
@@ -376,21 +364,16 @@ Return the JSON object now. Return no Markdown and no additional text."""
 
 PROMPT_VERSIONS = ("baseline", "production")
 
-# Production only, and inserted ONLY for a brief that actually requests a subjective quality:
-# the exact brief word is substituted for {term}. Non-subjective production records are told to
-# omit the field entirely (see _NO_SUBJECTIVE_INSTRUCTION). Baseline gets neither.
-_SUBJECTIVE_INSTRUCTION = (
-    "\n- CURRENT_BRIEF requests the subjective quality \"{term}\". Return a subjective_requirements "
-    "array with EXACTLY ONE item whose requirement is exactly \"{term}\", status is one of "
-    "\"supported\"/\"ambiguous\"/\"failed\", visible_evidence cites concrete pixels, and source_ids "
-    "come from ALLOWED_SOURCE_IDS (use POSE-01 and brief:CURRENT_ASSET_ID). Grade it only from "
-    "visible pose/furniture evidence. Ship ONLY if status is \"supported\" with concrete "
-    "visible_evidence; if \"ambiguous\" choose human_review UNLESS an independent major issue or "
-    "external blocker already forces reject/unsupported; if \"failed\", reject and record one "
-    "major/critical issue citing both POSE-01 and brief:CURRENT_ASSET_ID."
+# The only production addition. It generalizes FB-001 without turning example feedback into policy.
+_COLOR_CLOTHING_INSTRUCTION = (
+    "\n- When a large red field could represent clothing or exposed skin, inspect clothing "
+    "boundaries, limb ownership, and overlap. Apply COLOR-02/CHAR-02 only from concrete visible "
+    "relationships; do not infer from red color alone."
 )
-_NO_SUBJECTIVE_INSTRUCTION = (
-    "\n- Do NOT include a subjective_requirements field for this brief."
+_REPAIR_TEMPLATE = (
+    "Your previous JSON failed validation for these reasons:\n{errors}\n"
+    "Re-evaluate the same target and sources. Return one complete corrected JSON object only. "
+    "Do not hide an observed issue or weaken severity merely to satisfy verdict consistency."
 )
 
 
@@ -399,12 +382,13 @@ def _prompt_hash(*parts: str) -> str:
 
 
 # Template revisions, not digests of rendered per-record messages, context, or attachments.
-# Baseline excludes production-only subjective instructions, so changing those does not
-# invalidate a genuinely unchanged baseline template.
+# Production's new instruction marks this release; baseline needs an explicit bump because the
+# shared signals payload also dropped the old subjective hint. Both include the repair path.
 PROMPT_REVISIONS = {
-    "baseline": _prompt_hash(_SYSTEM_PROMPT, _USER_PROMPT),
-    "production": _prompt_hash(_SYSTEM_PROMPT, _USER_PROMPT, _SUBJECTIVE_INSTRUCTION,
-                               _NO_SUBJECTIVE_INSTRUCTION),
+    "baseline": _prompt_hash(_SYSTEM_PROMPT, _USER_PROMPT, _REPAIR_TEMPLATE,
+                             "brief-signals:no-subjective-v2"),
+    "production": _prompt_hash(_SYSTEM_PROMPT, _USER_PROMPT, _REPAIR_TEMPLATE,
+                               _COLOR_CLOTHING_INSTRUCTION),
 }
 
 
@@ -414,17 +398,10 @@ def _image_part(data: bytes) -> dict:
 
 
 def build_messages(brand_sources: dict, brief: dict, image: bytes, signals: dict) -> list:
-    # Production and baseline differ only in subjective handling, and the instruction is
-    # record-specific: it names the exact brief word, and explicitly forbids the field when the
-    # brief requests no subjective quality (so the model can't invent one).
-    if brand_sources["prompt_version"] != "production":
-        subjective = ""
-    elif signals.get("subjective_quality"):
-        subjective = _SUBJECTIVE_INSTRUCTION.format(term=signals["subjective_quality"])
-    else:
-        subjective = _NO_SUBJECTIVE_INSTRUCTION
+    improvement = (_COLOR_CLOTHING_INSTRUCTION
+                   if brand_sources["prompt_version"] == "production" else "")
     system = _SYSTEM_PROMPT.format(
-        subjective=subjective,
+        subjective=improvement,
         guide=brand_sources["guide_text"],
         clarifications=json.dumps(brand_sources["approved_clarifications"]),
         ref_descriptions=brand_sources["reference_descriptions"],
@@ -457,21 +434,13 @@ class ValidationError(Exception):
     pass
 
 
-def _semantic_validate(record: dict, brief: dict, allowed: set[str], signals: dict,
-                       prompt_version: str = "production") -> None:
+def _semantic_validate(record: dict, brief: dict, allowed: set[str], signals: dict) -> None:
     """Context-dependent rules applied after JSON-schema validation."""
     errors: list[str] = []
     aid = brief["asset_id"]
     verdict = record.get("verdict")
     issues = record.get("issues", [])
     checks = record.get("unverifiable_checks", [])
-    subj_reqs = record.get("subjective_requirements")
-    subj_term = signals.get("subjective_quality")
-    # Only a well-formed array on a genuinely subjective brief may resolve human_review.
-    has_ambiguous_subjective = bool(
-        subj_term and isinstance(subj_reqs, list)
-        and any(isinstance(s, dict) and s.get("status") == "ambiguous" for s in subj_reqs)
-    )
 
     if record.get("asset_id") != aid:
         errors.append(f"asset_id mismatch: got {record.get('asset_id')!r}, expected {aid!r}")
@@ -538,7 +507,7 @@ def _semantic_validate(record: dict, brief: dict, allowed: set[str], signals: di
             errors.append("human_review not allowed with a critical/major issue (reject takes precedence)")
         if ext_blocker:
             errors.append("human_review not allowed for an external-authority requirement (unsupported takes precedence)")
-        if not (amb_unknown or conflict_unknown or has_ambiguous_subjective):
+        if not (amb_unknown or conflict_unknown):
             errors.append("human_review must identify a decision-critical visual ambiguity or active-source conflict")
         if not blocking:
             errors.append("human_review must have a non-empty blocking_reason")
@@ -564,63 +533,13 @@ def _semantic_validate(record: dict, brief: dict, allowed: set[str], signals: di
         if not (mentioned or copy_issue or readability):
             errors.append("required copy present in brief but not addressed in summary/issues/checks")
 
-    # Structured subjective-requirement check (production only). Validate the array itself
-    # (types, one entry, matching brief word, allow-listed unique source_ids) and enforce
-    # verdict-consistency WITHOUT overriding the reject > unsupported > human_review > ship
-    # precedence: an ambiguous quality does not force human_review when an independent serious
-    # issue (reject) or external blocker (unsupported) already applies.
-    if prompt_version == "production":
-        if subj_term:
-            if not isinstance(subj_reqs, list) or len(subj_reqs) != 1 or not isinstance(subj_reqs[0], dict):
-                errors.append(f"brief requests subjective quality '{subj_term}': expected exactly one subjective_requirements object")
-            else:
-                item = subj_reqs[0]
-                st = item.get("status")
-                req = item.get("requirement")
-                ev = item.get("visible_evidence")
-                sids = item.get("source_ids")
-                str_ids = [s for s in sids if isinstance(s, str)] if isinstance(sids, list) else []
-                if not isinstance(req, str) or req.strip().lower() != subj_term.lower():
-                    errors.append(f"subjective_requirements.requirement must equal the brief term '{subj_term}'")
-                if not isinstance(st, str) or st not in {"supported", "ambiguous", "failed"}:
-                    errors.append("subjective_requirements.status must be supported/ambiguous/failed")
-                if not isinstance(ev, str) or not ev.strip():
-                    errors.append("subjective_requirements.visible_evidence must be a non-empty string")
-                if not isinstance(sids, list) or not sids or len(str_ids) != len(sids):
-                    errors.append("subjective_requirements.source_ids must be a non-empty list of strings")
-                elif len(set(sids)) != len(sids):
-                    errors.append("subjective_requirements.source_ids must be unique")
-                elif set(sids) - allowed:
-                    errors.append(f"subjective_requirements.source_ids not in allow-list: {sorted(set(sids) - allowed)}")
-                # ship needs 'supported'; 'failed' must resolve to reject grounded on the pose
-                # rule + this brief and backed by a serious issue. 'ambiguous' does not ship,
-                # and may resolve to human_review (see the human_review branch) or, when a
-                # higher-priority blocker exists, to reject/unsupported.
-                if verdict == "ship" and st != "supported":
-                    errors.append("ship requires the subjective requirement status 'supported'")
-                if st == "failed":
-                    if verdict != "reject":
-                        errors.append("a failed subjective requirement must resolve to reject")
-                    if not {"POSE-01", f"brief:{aid}"} <= set(str_ids):
-                        errors.append("a failed subjective requirement must cite POSE-01 and the current brief")
-                    if not any(
-                        it.get("severity") in {"critical", "major"}
-                        and {"POSE-01", f"brief:{aid}"} <= set(it.get("source_ids", []))
-                        for it in issues
-                    ):
-                        errors.append("a failed subjective requirement must be backed by one major/critical "
-                                      "issue citing POSE-01 and the current brief")
-        elif "subjective_requirements" in record:
-            errors.append("subjective_requirements must be absent when the brief requests no subjective quality")
-
     if errors:
         raise ValidationError("; ".join(errors))
 
 
-def validate_review(record: dict, schema: dict, brief: dict, allowed: set[str], signals: dict,
-                    prompt_version: str = "production") -> None:
+def validate_review(record: dict, schema: dict, brief: dict, allowed: set[str], signals: dict) -> None:
     jsonschema.validate(record, schema)  # raises jsonschema.ValidationError
-    _semantic_validate(record, brief, allowed, signals, prompt_version)
+    _semantic_validate(record, brief, allowed, signals)
 
 
 def validate_result_file(records: list[dict], pack: "TaskPack", expected_prompt_version: str,
@@ -661,8 +580,7 @@ def validate_result_file(records: list[dict], pack: "TaskPack", expected_prompt_
             if aid in briefs:
                 b = briefs[aid]
                 bs = build_brand_sources(pack, b, expected_prompt_version)
-                _semantic_validate(r, b, set(bs["allowed_source_ids"]),
-                                   brief_signals(b["request"]), expected_prompt_version)
+                _semantic_validate(r, b, set(bs["allowed_source_ids"]), brief_signals(b["request"]))
         elif r.get("model"):
             models.add(r["model"])
     if seen != expected_ids:
@@ -709,13 +627,6 @@ def _failure_record(asset_id: str, status: str, reason: str, meta: dict | None =
     return rec
 
 
-_REPAIR_TEMPLATE = (
-    "Your previous JSON failed validation for these reasons:\n{errors}\n"
-    "Re-evaluate the same target and sources. Return one complete corrected JSON object only. "
-    "Do not hide an observed issue or weaken severity merely to satisfy verdict consistency."
-)
-
-
 def review_asset(brand_sources: dict, brief: dict, image: bytes, call_model: ModelCall,
                  schema: dict) -> dict:
     """Review one target illustration. Returns a schema-valid record dict.
@@ -756,8 +667,7 @@ def review_asset(brand_sources: dict, brief: dict, image: bytes, call_model: Mod
             content, meta = _invoke(call_model, messages)
             _account(meta)
             record = json.loads(content)
-            validate_review(record, schema, brief, allowed, signals,
-                            prompt_version=brand_sources["prompt_version"])
+            validate_review(record, schema, brief, allowed, signals)
         except TruncatedOutput as e:
             _account(e.meta)  # the truncated call was still paid for
             last_error = f"{type(e).__name__}: {_scrub(str(e))}"
@@ -924,13 +834,26 @@ def _cal_predictions(records: list[dict], cal_ids: set[str]) -> dict[str, dict]:
     return {r["asset_id"]: r for r in records if r["asset_id"] in cal_ids}
 
 
+def _acceptance_gate(before: dict, after: dict, regressions: list[dict], model: str | None) -> dict:
+    checks = {
+        "processing_success_rate_is_1": after["processing_success_rate"] == 1,
+        "no_regressions": not regressions,
+        "unsafe_false_approvals_not_worse": (
+            after["unsafe_false_approvals"] <= before["unsafe_false_approvals"]),
+        "blocking_unknown_false_approvals_not_worse": (
+            after["blocking_unknown_false_approvals"]
+            <= before["blocking_unknown_false_approvals"]),
+    }
+    return {"model": model, "passed": all(checks.values()), "checks": checks}
+
+
 def evaluate(pack: TaskPack, baseline_records: list[dict],
              production_records: list[dict]) -> dict:
     """Compact before/after metrics on the six calibration assets.
 
-    Improvement = the production pipeline's structured subjective-requirement check
-    plus ship-consistency validation. before = baseline run (no subjective check),
-    after = production run (with it). Per-case rows make every difference auditable.
+    Improvement = the production pipeline's general red clothing-vs-skin disambiguation
+    instruction, motivated by FB-001. Baseline omits it. Per-case rows make every
+    difference auditable.
     """
     cal_ids = set(pack.calibration_labels)
     before = _metrics(_cal_predictions(baseline_records, cal_ids), pack.calibration_labels)
@@ -977,10 +900,10 @@ def evaluate(pack: TaskPack, baseline_records: list[dict],
 
     return {
         "prompt_versions": {
-            "baseline": "no subjective-requirement assessment",
-            "production": "+ structured subjective-requirement check (supported/ambiguous/failed) with ship-consistency validation",
+            "baseline": "no explicit red clothing-vs-skin disambiguation instruction",
+            "production": "+ inspect boundaries/ownership/overlap before applying COLOR-02/CHAR-02",
         },
-        "improvement": "model-graded subjective-requirement check + ship-consistency validation (motivated by FB-002)",
+        "improvement": "general color/clothing disambiguation instruction (motivated by FB-001)",
         "metric_definitions": {
             "serious_false_approvals": "ship where the label has a critical/major expected issue",
             "unsafe_false_approvals": "ship where the label is reject/human_review/unsupported",
@@ -990,6 +913,7 @@ def evaluate(pack: TaskPack, baseline_records: list[dict],
         "after": after,
         "deltas": deltas,
         "regressions": regressions,
+        "acceptance_gate": _acceptance_gate(before, after, regressions, operational["model"]),
         "operational": operational,
     }
 

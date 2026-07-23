@@ -32,45 +32,52 @@ uv run --locked python -m solution run \
 ```
 
 `--model` defaults to `google-gemini-3-1-flash-lite` (a vision-capable Runware model); override
-with `--model <id>`. `--max-tokens` defaults to 8192 (reasoning models truncate at less; truncation
-is detected via `finish_reason` and reported distinctly from malformed JSON). `run` writes one JSON
-line per brief (12 for this pack) in input order, using the **production** pipeline. Add
-`--prompt-version baseline` for the baseline pipeline (no subjective-requirement check).
+with `--model <id>`. A model change requires its own paired baseline/production evaluation; no
+model-independent gain is claimed. `--max-tokens` defaults to 8192 (reasoning models truncate at
+less; truncation is detected via `finish_reason` and reported distinctly from malformed JSON).
+`run` writes one JSON line per brief (12 for this pack) in input order, using the **production** pipeline. Add
+`--prompt-version baseline` for the baseline pipeline (no color/clothing disambiguation addition).
 
 Verify access first with one minimal request (prints only a sanitized error code / message /
-request id on failure); `dump-prompt` prints the authoritative templates (record context and images
-are inserted at execution):
+request id on failure); `dump-prompt` prints the authoritative system, user, and repair templates
+(record context and images are inserted at execution):
 
 ```bash
 uv run --locked python -m solution probe
 uv run --locked python -m solution dump-prompt
 ```
 
-The committed `reviews.jsonl` and `evaluation.json` were produced by a live run on
-`google-gemini-3-1-flash-lite` (see `SUMMARY_NOTE.md`). The model call is injected, so the offline
-tests never touch the network.
+The canonical `reviews.jsonl` and required `evaluation.json` are final aliases for the selected
+`google-gemini-3-1-flash-lite` run. Model comparisons use only model-scoped files; tests never touch
+the network.
 
 ## Evaluation (before/after calibration loop)
 
 ```bash
 uv run --locked python -m solution evaluate \
   --task-pack ./bubble-task-pack \
-  --current-output ./reviews.jsonl \
-  --output ./evaluation.json
+  --baseline-output ./evaluation.flash-lite.baseline.jsonl \
+  --current-output ./evaluation.flash-lite.production.jsonl \
+  --output ./evaluation.flash-lite.json
 ```
 
-The one improvement is a **model-graded subjective-requirement check** (production only): baseline
-and production are two live runs, so `evaluate` runs the 6 baseline calibration calls live (or
-reuses them via `--baseline-output`) and takes production from `--current-output ./reviews.jsonl`
-(or runs the 12 production calls live if omitted). Both files are re-validated: schema + semantics,
-**exact** id set (baseline = the 6 calibration ids, production = all 12), no unknown/duplicate ids,
-`model`/`prompt_version` and the matching template `prompt_revision` required for every record, and
-a single model across the run.
+`--output` is required. If either input is omitted, generated files inherit its prefix: for example,
+`--output evaluation.some-profile.json` writes `evaluation.some-profile.baseline.jsonl` and
+`evaluation.some-profile.production.jsonl`. This keeps comparisons away from canonical files.
 
-The baseline predictions are written to `evaluation.baseline.jsonl`, so a re-run can pass
-`--baseline-output evaluation.baseline.jsonl --current-output reviews.jsonl` and spend nothing.
+| Files | Role |
+|---|---|
+| `reviews.jsonl`, `evaluation.json` | Required final aliases; Flash Lite only |
+| `evaluation.flash-lite.*` | Current FB-001 pair; PASS; selected final model |
+| `evaluation.gemini-3-5-flash.*` | Current FB-001 comparison; PASS; diagnostic only |
 
-### `evaluation.json` shape
+The tested production change is a general **red clothing-vs-skin disambiguation instruction**
+motivated by FB-001. Baseline and production are separate calls. Both files are re-validated:
+schema + semantics, exact id set (baseline 6, production 12), no unknown/duplicate ids, matching
+`model`/`prompt_version`/`prompt_revision`, and one model per report. Both profiles use the same
+current prompt revisions; model-specific files prevent comparisons from replacing final aliases.
+
+### `evaluation.<profile>.json` shape
 
 Compact, no fixed schema:
 
@@ -84,11 +91,14 @@ Compact, no fixed schema:
   `per_case` (predicted vs labelled verdict, with per-metric flags).
 - `deltas` — after − before for the scalar metrics.
 - `regressions` — cases correct (by acceptable verdict) in baseline but wrong in production.
+- `acceptance_gate` — per-model PASS only when production processing succeeds completely, has no
+  regressions, and does not increase unsafe or blocking-unknown false approvals versus baseline.
 - `operational` — `model`, `total_calls`, `total_retries`, token totals, `runtime_s`, `cost_usd`,
   `cost_status` (`complete` / `partial_unavailable`).
 
 `per_case` shows predicted vs labelled verdict for every calibration asset, so any label
 disagreement is visible there and explained (without altering the label) in `SUMMARY_NOTE.md`.
+`evaluate` always writes the report, then exits non-zero if its model fails `acceptance_gate`.
 
 ## Tests
 
@@ -96,21 +106,20 @@ disagreement is visible there and explained (without altering the label) in `SUM
 uv run --locked python -m unittest discover -s tests
 ```
 
-Offline only — the model is always injected. 64 tests cover partial-batch failure isolation,
-truncation and unavailable-cost handling, the hardened semantic guardrails (missing/ non-unique
-check fields, verdict precedence, external-authority), the structured subjective-requirement check,
-the three false-approval metrics, reused-file validation (exact id sets / required fields / single
+Offline only — the model is always injected. 48 tests cover partial-batch failure isolation,
+truncation and unavailable-cost handling, the hardened semantic guardrails (missing/non-unique
+check fields, verdict precedence, external-authority), production prompt isolation, the three
+false-approval metrics, reused-file validation (exact id sets / required fields / single
 model), fail-fast loading, request assembly, prompt hygiene, and a missing API key.
 
 ## Expected API cost
 
-A full live loop is **12 production + 6 baseline calls** (~18, plus any bounded repair retries).
-Settings are deterministic (`temperature=0`, `max_tokens=8192`). The measured live run on
-`google-gemini-3-1-flash-lite` (input $0.25/M, output $1.50/M) cost **$0.051** total (20 calls,
-2 repair retries, ~66 s) — far under the USD 15 credit. Cost is computed from response token usage × the
-model's published per-token price (Runware's non-streaming response reports usage, not cost); if the
-price is unavailable it is reported as `null` with `cost_status`, never faked as $0. Totals are
-aggregated into `evaluation.json` → `operational`.
+A full loop is **12 production + 6 baseline calls** per model, plus bounded repairs. The fresh paired
+comparison used 19 Flash Lite calls (one repair) and 18 Gemini 3.5 Flash calls: **37 calls,
+$0.528472 total** (~$0.57 expected). Settings use `temperature=0`, `max_tokens=8192`. Cost is
+computed from response token usage × the model's published per-token price (Runware reports usage,
+not cost); unavailable prices are `null` with `cost_status`, never fake $0. Each model report stores
+its own `operational` totals; `evaluation.json` is the Flash Lite final alias.
 
 ## Design notes
 
@@ -119,27 +128,28 @@ aggregated into `evaluation.json` → `operational`.
   source IDs the model may cite.
 - **Untrusted data.** Briefs, feedback, filenames, metadata, and image text are treated as data,
   never instructions. Pixels cannot prove licensing/ownership/consent/approval.
-- **Deterministic brief signals** (required copy; strong vs weak external-authority terms; the
-  brief's subjective word) reduce model omissions but never become policy.
+- **Deterministic brief signals** cover required copy and external-authority terms only; subjective
+  words create no signal, field, or verdict rule.
 - **Validation before use.** Every model record is checked against `contracts/review.schema.json`
   and semantic rules with strict **verdict precedence** (reject > unsupported > human_review > ship):
   every unverifiable check must carry category/decision_critical/unique source_ids; `ship`/`reject`
   require a null `blocking_reason`; a decision-critical external requirement can never ship. One
-  bounded repair retry, else a schema-valid `provider_error`, and the batch continues.
-- **Model-graded subjective check.** The one improvement (FB-002): for a subjective brief the model
-  must grade the requirement `supported`/`ambiguous`/`failed` with visible evidence; the pipeline
-  enforces consistency within the reject > unsupported > human_review > ship precedence
-  (ship needs `supported`; `ambiguous`⇒human_review unless a higher-priority reject/unsupported
-  already applies; `failed`⇒reject grounded on one major/critical issue citing POSE-01 and the
-  current brief). It never invents ambiguity from a keyword. Every production record must carry the
-  matching template `prompt_revision`; unstamped records are rejected. This is not a digest of
-  per-record context or attachments.
+  bounded repair retry, else a schema-valid `provider_error`, and the batch continues. Production
+  is accepted per model only with 100% processing, no regressions, and no increase in unsafe or
+  blocking-unknown false approvals.
+- **Color/clothing disambiguation.** The one production addition generalizes FB-001: when a large
+  red field could be clothing or exposed skin, inspect boundaries, limb ownership, and overlap;
+  apply COLOR-02/CHAR-02 only from concrete relationships, never red alone. It adds no fields or
+  model-specific branch. Every record must carry the matching `prompt_revision`, which covers the
+  system, user, production-addition, and repair templates; unstamped records are rejected. It is not
+  a digest of per-record context or attachments.
 - **Robust model I/O.** `max_tokens=8192` with `finish_reason` truncation detection; `max_retries=0`
   and a per-call timeout so one hung call cannot stall the batch; a missing `RUNWARE_API_KEY` exits
   cleanly (no traceback, no leak).
 - **Fail-fast loading.** Malformed/duplicate feedback, unknown `policy_effect`/`superseded_by`, and
   undecodable references are rejected before any paid call.
-- **Single prompt source.** The runtime prompt lives in `core.py`; `dump-prompt` prints it verbatim.
+- **Single prompt source.** Runtime system/user/repair templates live in `core.py`; `dump-prompt`
+  prints them.
 - **Failure-safety.** Sequential processing; each record is isolated; one JSON line is flushed after
   every record. Images are never deduplicated by bytes — identical artwork under different briefs is
   reviewed independently.

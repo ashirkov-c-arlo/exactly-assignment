@@ -1,22 +1,25 @@
 """Offline tests. No live API call belongs here — the model is always injected.
 
 Covers batch failure-safety, hardened semantic guardrails (missing fields, verdict
-precedence, external-authority, unique check source_ids), the structured
-subjective-requirement check, the three false-approval metrics, reused-file
+precedence, external-authority, unique check source_ids), the production color/clothing
+instruction, the three false-approval metrics, reused-file
 validation (exact ID sets / required fields / single model), truncation and
 unknown-cost handling, fail-fast loading, request assembly, and prompt hygiene.
 Run: uv run --locked python -m unittest discover -s tests
 """
 
+import io
 import json
 import os
 import re
 import shutil
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 
+from solution import __main__ as cli
 from solution import core
 
 PACK = Path(__file__).resolve().parents[1] / "bubble-task-pack"
@@ -54,8 +57,7 @@ def _signals(messages):
 
 
 def echo_model(messages):
-    """Valid-per-brief fake: unsupported for external briefs, else human_review; adds a
-    subjective_requirements entry when the brief requests a subjective quality."""
+    """Valid-per-brief fake: unsupported for external briefs, else human_review."""
     aid, src, sig = _asset_id(messages), _brief_src(messages), _signals(messages)
     if sig.get("decision_critical_external_requirement"):
         return json.dumps({
@@ -74,9 +76,6 @@ def echo_model(messages):
                                  "decision_critical": True}],
         "blocking_reason": "ambiguous for test",
     }
-    if sig.get("subjective_quality"):
-        rec["subjective_requirements"] = [{"requirement": sig["subjective_quality"], "status": "ambiguous",
-                                           "visible_evidence": "pose/furniture unclear", "source_ids": [src]}]
     return json.dumps(rec), {"model": "fake", "cost": 0.0}
 
 
@@ -146,10 +145,9 @@ class TestSemanticValidation(unittest.TestCase):
         allowed = set(core.build_brand_sources(self.pack, brief, "production")["allowed_source_ids"])
         return brief, allowed, core.brief_signals(request)
 
-    def _validate(self, record, request="Show a person leaping forward.", asset_id="cal_001",
-                  prompt_version="production"):
+    def _validate(self, record, request="Show a person leaping forward.", asset_id="cal_001"):
         brief, allowed, signals = self._ctx(request, asset_id)
-        core.validate_review(record, self.pack.schema, brief, allowed, signals, prompt_version)
+        core.validate_review(record, self.pack.schema, brief, allowed, signals)
 
     def _base(self, verdict, asset_id="cal_001", **over):
         rec = {"asset_id": asset_id, "processing_status": "completed", "verdict": verdict,
@@ -235,135 +233,10 @@ class TestSemanticValidation(unittest.TestCase):
                                                "source_ids": ["brief:review_006"], "decision_critical": True}])
         self._validate(rec, request=req, asset_id="review_006")
 
-    def test_non_subjective_brief_rejects_subjective_array(self):
-        # A non-subjective brief must not carry an (invented) subjective_requirements field.
-        rec = self._base("human_review", blocking_reason="b", unverifiable_checks=[self._amb()],
-                         subjective_requirements=[{"requirement": "leaping forward", "status": "ambiguous",
-                                                   "visible_evidence": "x", "source_ids": ["brief:cal_001"]}])
-        with self.assertRaises(core.ValidationError):
-            self._validate(rec)
-
-
-class TestSubjectiveRequirement(unittest.TestCase):
-    REQ = "Show a woman sitting comfortably on a sofa and checking her phone."
-
-    def setUp(self):
-        self.pack = core.load_task_pack(PACK)
-        self.brief = {"asset_id": "cal_005", "image_path": "x", "request": self.REQ}
-        self.allowed = set(core.build_brand_sources(self.pack, self.brief, "production")["allowed_source_ids"])
-        self.signals = core.brief_signals(self.REQ)
-
-    def _v(self, record, prompt_version="production"):
-        core.validate_review(record, self.pack.schema, self.brief, self.allowed, self.signals, prompt_version)
-
-    def _rec(self, verdict, **over):
-        rec = {"asset_id": "cal_005", "processing_status": "completed", "verdict": verdict,
-               "summary": "s", "issues": [], "unverifiable_checks": [], "blocking_reason": None}
-        rec.update(over)
-        return rec
-
-    def _subj(self, status, requirement="comfortably", source_ids=("brief:cal_005",), n=1):
-        item = {"requirement": requirement, "status": status,
-                "visible_evidence": "seated with back supported", "source_ids": list(source_ids)}
-        return [dict(item) for _ in range(n)]
-
-    def test_signal_uses_brief_word_not_stem(self):
-        self.assertEqual(self.signals["subjective_quality"], "comfortably")  # not 'comfortab'
-
-    def test_ship_without_assessment_rejected(self):
-        with self.assertRaises(core.ValidationError):
-            self._v(self._rec("ship"))
-
-    def test_ship_with_supported_assessment_ok(self):
-        self._v(self._rec("ship", subjective_requirements=self._subj("supported")))
-
-    def test_ship_with_ambiguous_assessment_rejected(self):
-        with self.assertRaises(core.ValidationError):
-            self._v(self._rec("ship", subjective_requirements=self._subj("ambiguous")))
-
-    def test_ambiguous_assessment_allows_human_review(self):
-        self._v(self._rec("human_review", blocking_reason="unresolved comfort",
-                          subjective_requirements=self._subj("ambiguous")))
-
-    def test_baseline_does_not_require_assessment(self):
-        self._v(self._rec("ship"), prompt_version="baseline")  # must not raise
-
-    def test_wrong_requirement_name_rejected(self):
-        with self.assertRaises(core.ValidationError):
-            self._v(self._rec("ship", subjective_requirements=self._subj("supported", requirement="luxurious")))
-
-    def test_multiple_entries_rejected(self):
-        with self.assertRaises(core.ValidationError):
-            self._v(self._rec("ship", subjective_requirements=self._subj("supported", n=2)))
-
-    def test_unknown_source_id_rejected(self):
-        with self.assertRaises(core.ValidationError):
-            self._v(self._rec("ship", subjective_requirements=self._subj("supported", source_ids=("NOPE-99",))))
-
-    def test_duplicate_source_id_rejected(self):
-        rec = self._rec("ship", subjective_requirements=self._subj("supported",
-                                                                   source_ids=("POSE-01", "POSE-01")))
-        with self.assertRaises(core.ValidationError):
-            self._v(rec)
-
-    def test_failed_without_issue_rejected(self):
-        with self.assertRaises(core.ValidationError):
-            self._v(self._rec("reject", subjective_requirements=self._subj("failed")))
-
-    def test_failed_with_grounded_major_issue_reject_ok(self):
-        rec = self._rec("reject", subjective_requirements=self._subj("failed", source_ids=("POSE-01", "brief:cal_005")),
-                        issues=[{"severity": "major", "observation": "stiff pose",
-                                 "source_ids": ["POSE-01", "brief:cal_005"],
-                                 "why_it_matters": "y", "suggested_fix": "z"}])
-        self._v(rec)  # must not raise
-
-    def test_failed_without_pose_grounding_rejected(self):
-        # 'failed' must cite POSE-01 + the brief, not lean on an unrelated major issue.
-        rec = self._rec("reject", subjective_requirements=self._subj("failed", source_ids=("brief:cal_005",)),
-                        issues=[{"severity": "major", "observation": "red legs",
-                                 "source_ids": ["COLOR-02"], "why_it_matters": "y", "suggested_fix": "z"}])
-        with self.assertRaises(core.ValidationError):
-            self._v(rec)
-
-    def test_malformed_non_list_rejected(self):
-        with self.assertRaises(core.ValidationError):
-            self._v(self._rec("ship", subjective_requirements={"requirement": "comfortably"}))
-
-    def test_ambiguous_with_independent_reject_allowed(self):
-        # Precedence: an independent major issue -> reject wins; ambiguous must not force human_review.
-        rec = self._rec("reject", subjective_requirements=self._subj("ambiguous"),
-                        issues=[{"severity": "major", "observation": "red legs read as skin",
-                                 "source_ids": ["COLOR-02"], "why_it_matters": "y", "suggested_fix": "z"}])
-        self._v(rec)  # must not raise
-
-    def test_malformed_field_types_raise_validationerror_not_exception(self):
-        rec = self._rec("ship", subjective_requirements=[{"requirement": 123, "status": "supported",
-                                                          "visible_evidence": 456, "source_ids": [{}]}])
-        with self.assertRaises(core.ValidationError):  # not AttributeError/TypeError
-            self._v(rec)
-
-    def test_malformed_status_dict_raises_validationerror(self):
-        rec = self._rec("ship", subjective_requirements=self._subj({}))  # unhashable status
-        with self.assertRaises(core.ValidationError):  # not TypeError from `in {...}`
-            self._v(rec)
-
-    def test_failed_without_pose_issue_rejected(self):
-        # 'failed' backed only by an unrelated serious issue (no POSE-01 issue) is rejected.
-        rec = self._rec("reject", subjective_requirements=self._subj("failed", source_ids=("POSE-01", "brief:cal_005")),
-                        issues=[{"severity": "major", "observation": "gradient shading",
-                                 "source_ids": ["STYLE-01"], "why_it_matters": "y", "suggested_fix": "z"}])
-        with self.assertRaises(core.ValidationError):
-            self._v(rec)
-
-    def test_failed_with_unrelated_major_and_minor_pose_rejected(self):
-        rec = self._rec("reject", subjective_requirements=self._subj("failed", source_ids=("POSE-01", "brief:cal_005")),
-                        issues=[{"severity": "major", "observation": "gradient shading",
-                                 "source_ids": ["STYLE-01"], "why_it_matters": "y", "suggested_fix": "z"},
-                                {"severity": "minor", "observation": "pose is ambiguous",
-                                 "source_ids": ["POSE-01", "brief:cal_005"],
-                                 "why_it_matters": "y", "suggested_fix": "z"}])
-        with self.assertRaises(core.ValidationError):
-            self._v(rec)
+    def test_subjective_word_creates_no_special_signal_or_contract(self):
+        request = "Show a woman sitting comfortably on a sofa and checking her phone."
+        self.assertNotIn("subjective_quality", core.brief_signals(request))
+        self._validate(self._base("ship", asset_id="cal_005"), request=request, asset_id="cal_005")
 
 
 class TestMetrics(unittest.TestCase):
@@ -379,6 +252,28 @@ class TestMetrics(unittest.TestCase):
         by = {c["asset_id"]: c for c in m["per_case"]}
         self.assertTrue(by["cal_005"]["blocking_unknown_false_approval"])
         self.assertFalse(by["cal_005"]["serious_false_approval"])
+
+    def test_acceptance_gate_passes_when_production_is_not_worse(self):
+        before = {"processing_success_rate": 1.0, "unsafe_false_approvals": 2,
+                  "blocking_unknown_false_approvals": 1}
+        after = dict(before)
+        gate = core._acceptance_gate(before, after, [], "flash-lite")
+        self.assertTrue(gate["passed"])
+        self.assertTrue(all(gate["checks"].values()))
+        after["processing_success_rate"] = 0.999
+        self.assertFalse(core._acceptance_gate(before, after, [], "flash-lite")["passed"])
+
+    def test_acceptance_gate_rejects_unsafe_model_regression(self):
+        before = {"processing_success_rate": 1.0, "unsafe_false_approvals": 0,
+                  "blocking_unknown_false_approvals": 0}
+        after = {"processing_success_rate": 1.0, "unsafe_false_approvals": 1,
+                 "blocking_unknown_false_approvals": 1}
+        gate = core._acceptance_gate(before, after, [{"asset_id": "cal_005"}], "3.5-flash")
+        self.assertFalse(gate["passed"])
+        self.assertTrue(gate["checks"]["processing_success_rate_is_1"])
+        self.assertFalse(gate["checks"]["no_regressions"])
+        self.assertFalse(gate["checks"]["unsafe_false_approvals_not_worse"])
+        self.assertFalse(gate["checks"]["blocking_unknown_false_approvals_not_worse"])
 
 
 class TestIndependentIdenticalImages(unittest.TestCase):
@@ -562,23 +457,31 @@ class TestRequestAssemblyAndPromptHygiene(unittest.TestCase):
         for leaked in ("cal_005", "review_002", "review_004", "feather duster", "feather_duster"):
             self.assertNotIn(leaked, system)
 
-    def test_subjective_instruction_only_for_subjective_briefs(self):
+    def test_revisions_and_dump_include_repair_template(self):
+        self.assertEqual(core.PROMPT_REVISIONS["baseline"],
+                         core._prompt_hash(core._SYSTEM_PROMPT, core._USER_PROMPT,
+                                           core._REPAIR_TEMPLATE, "brief-signals:no-subjective-v2"))
+        self.assertEqual(core.PROMPT_REVISIONS["production"],
+                         core._prompt_hash(core._SYSTEM_PROMPT, core._USER_PROMPT,
+                                           core._REPAIR_TEMPLATE, core._COLOR_CLOTHING_INSTRUCTION))
+        output = io.StringIO()
+        with redirect_stdout(output):
+            cli.cmd_dump_prompt(None)
+        self.assertIn("=== REPAIR PROMPT TEMPLATE ===", output.getvalue())
+        self.assertIn(core._REPAIR_TEMPLATE, output.getvalue())
+
+    def test_color_clothing_instruction_is_production_only(self):
         img, _ = core.resolve_image(self.pack.root, "assets/review/review_001.png")
-        # Non-subjective brief: production forbids the field, no exact-word instruction.
-        nb = {"asset_id": "review_001", "image_path": "x", "request": "Show a worker waving hello."}
-        nb_sys = core.build_messages(core.build_brand_sources(self.pack, nb, "production"),
-                                     nb, img, core.brief_signals(nb["request"]))[0]["content"]
-        self.assertIn("Do NOT include a subjective_requirements", nb_sys)
-        # Subjective brief: names the exact brief word.
-        sb = {"asset_id": "cal_005", "image_path": "x",
-              "request": "Show a woman sitting comfortably on a sofa and checking her phone."}
-        sb_sys = core.build_messages(core.build_brand_sources(self.pack, sb, "production"),
-                                     sb, img, core.brief_signals(sb["request"]))[0]["content"]
-        self.assertIn('requests the subjective quality "comfortably"', sb_sys)
-        # Baseline names neither.
-        bl_sys = core.build_messages(core.build_brand_sources(self.pack, sb, "baseline"),
-                                     sb, img, core.brief_signals(sb["request"]))[0]["content"]
-        self.assertNotIn("subjective_requirements", bl_sys)
+        brief = {"asset_id": "review_001", "image_path": "x", "request": "Show a worker waving hello."}
+        production = core.build_messages(core.build_brand_sources(self.pack, brief, "production"),
+                                         brief, img, core.brief_signals(brief["request"]))[0]["content"]
+        baseline = core.build_messages(core.build_brand_sources(self.pack, brief, "baseline"),
+                                       brief, img, core.brief_signals(brief["request"]))[0]["content"]
+        self.assertIn("large red field could represent clothing or exposed skin", production)
+        self.assertIn("clothing boundaries, limb ownership, and overlap", production)
+        self.assertNotIn("large red field could represent clothing or exposed skin", baseline)
+        self.assertEqual(production.replace(core._COLOR_CLOTHING_INSTRUCTION, ""), baseline)
+        self.assertNotIn("subjective_requirements", production + baseline)
 
 
 class TestModelBackend(unittest.TestCase):
