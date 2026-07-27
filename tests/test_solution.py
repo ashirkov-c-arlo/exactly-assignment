@@ -2,8 +2,8 @@
 
 Covers batch failure-safety, hardened semantic guardrails (missing fields, verdict
 precedence, external-authority, unique check source_ids), the production color/clothing
-instruction, the three false-approval metrics, reused-file
-validation (exact ID sets / required fields / single model), truncation and
+instruction, false-approval/issue-recall metrics, non-regression/lift reporting,
+reused-file validation (exact ID sets / required fields / single model), truncation and
 unknown-cost handling, fail-fast loading, request assembly, and prompt hygiene.
 Run: uv run --locked python -m unittest discover -s tests
 """
@@ -253,27 +253,62 @@ class TestMetrics(unittest.TestCase):
         self.assertTrue(by["cal_005"]["blocking_unknown_false_approval"])
         self.assertFalse(by["cal_005"]["serious_false_approval"])
 
-    def test_acceptance_gate_passes_when_production_is_not_worse(self):
+    def test_general_serious_issue_source_recall_matches_labelled_issues(self):
+        pack = core.load_task_pack(PACK)
+        preds = {aid: {"processing_status": "completed", "verdict": "ship", "issues": []}
+                 for aid in pack.calibration_labels}
+        preds["cal_002"]["issues"] = [{"severity": "major", "source_ids": ["COLOR-02"]}]
+        preds["cal_003"]["issues"] = [{"severity": "major", "source_ids": ["POSE-01"]}]
+        metrics = core._metrics(preds, pack.calibration_labels)
+        self.assertEqual(sum(c["serious_issues_found_by_source"] for c in metrics["per_case"]), 2)
+        self.assertEqual(sum(c["serious_issues_expected"] for c in metrics["per_case"]), 3)
+        self.assertEqual(metrics["general_serious_issue_source_recall"], 0.667)
+
+    def test_non_regression_gate_requires_complete_pair(self):
         before = {"processing_success_rate": 1.0, "unsafe_false_approvals": 2,
-                  "blocking_unknown_false_approvals": 1}
+                  "blocking_unknown_false_approvals": 1,
+                  "general_serious_issue_source_recall": 0.333}
         after = dict(before)
-        gate = core._acceptance_gate(before, after, [], "flash-lite")
+        gate = core._non_regression_gate(before, after, [], "flash-lite")
         self.assertTrue(gate["passed"])
         self.assertTrue(all(gate["checks"].values()))
-        after["processing_success_rate"] = 0.999
-        self.assertFalse(core._acceptance_gate(before, after, [], "flash-lite")["passed"])
-
-    def test_acceptance_gate_rejects_unsafe_model_regression(self):
-        before = {"processing_success_rate": 1.0, "unsafe_false_approvals": 0,
-                  "blocking_unknown_false_approvals": 0}
-        after = {"processing_success_rate": 1.0, "unsafe_false_approvals": 1,
-                 "blocking_unknown_false_approvals": 1}
-        gate = core._acceptance_gate(before, after, [{"asset_id": "cal_005"}], "3.5-flash")
+        before["processing_success_rate"] = 0.833
+        gate = core._non_regression_gate(before, after, [], "flash-lite")
         self.assertFalse(gate["passed"])
-        self.assertTrue(gate["checks"]["processing_success_rate_is_1"])
+        self.assertFalse(gate["checks"]["processing_success_rates_are_1"])
+        before["processing_success_rate"], after["processing_success_rate"] = 1.0, 0.999
+        self.assertFalse(core._non_regression_gate(before, after, [], "flash-lite")["passed"])
+
+
+    def test_non_regression_gate_rejects_unsafe_model_regression(self):
+        before = {"processing_success_rate": 1.0, "unsafe_false_approvals": 0,
+                  "blocking_unknown_false_approvals": 0,
+                  "general_serious_issue_source_recall": 0.667}
+        after = {"processing_success_rate": 1.0, "unsafe_false_approvals": 1,
+                 "blocking_unknown_false_approvals": 1,
+                 "general_serious_issue_source_recall": 0.333}
+        gate = core._non_regression_gate(before, after, [{"asset_id": "cal_005"}], "3.5-flash")
+        self.assertFalse(gate["passed"])
+        self.assertTrue(gate["checks"]["processing_success_rates_are_1"])
         self.assertFalse(gate["checks"]["no_regressions"])
         self.assertFalse(gate["checks"]["unsafe_false_approvals_not_worse"])
         self.assertFalse(gate["checks"]["blocking_unknown_false_approvals_not_worse"])
+        self.assertFalse(gate["checks"]["general_serious_issue_source_recall_not_worse"])
+
+    def test_improved_metrics_filter_signed_deltas(self):
+        pack = core.load_task_pack(PACK)
+        baseline = [{"asset_id": aid, "processing_status": "completed", "verdict": "ship",
+                     "issues": []} for aid in pack.calibration_labels]
+        production = [dict(r) for r in baseline]
+        next(r for r in production if r["asset_id"] == "cal_002")["issues"] = [
+            {"severity": "major", "source_ids": ["COLOR-02"]}]
+        next(r for r in production if r["asset_id"] == "cal_003")["issues"] = [
+            {"severity": "major", "source_ids": ["POSE-01"]}]
+        self.assertEqual(core.evaluate(pack, baseline, baseline)["improved_metrics"], [])
+        self.assertEqual(core.evaluate(pack, baseline, production)["improved_metrics"],
+                         ["general_serious_issue_source_recall"])
+        baseline[0]["processing_status"] = "provider_error"
+        self.assertEqual(core.evaluate(pack, baseline, production)["improved_metrics"], [])
 
 
 class TestIndependentIdenticalImages(unittest.TestCase):

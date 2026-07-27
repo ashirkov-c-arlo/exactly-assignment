@@ -3,11 +3,12 @@
     "baseline": "no explicit red clothing-vs-skin disambiguation instruction",
     "production": "+ inspect boundaries/ownership/overlap before applying COLOR-02/CHAR-02"
   },
-  "improvement": "general color/clothing disambiguation instruction (motivated by FB-001)",
+  "tested_change": "general color/clothing disambiguation instruction (motivated by FB-001)",
   "metric_definitions": {
     "serious_false_approvals": "ship where the label has a critical/major expected issue",
     "unsafe_false_approvals": "ship where the label is reject/human_review/unsupported",
-    "blocking_unknown_false_approvals": "ship where the label expects a decision-critical unknown"
+    "blocking_unknown_false_approvals": "ship where the label expects a decision-critical unknown",
+    "general_serious_issue_source_recall": "fraction of all labelled serious issues matched by a returned major/critical issue sharing at least one source_id; not specific to FB-001"
   },
   "before": {
     "n_cases": 6,
@@ -18,6 +19,7 @@
     "unsafe_false_approvals": 2,
     "blocking_unknown_false_approvals": 1,
     "unsafe_case_detection_rate": 0.333,
+    "general_serious_issue_source_recall": 0.333,
     "per_case": [
       {
         "asset_id": "cal_001",
@@ -34,7 +36,9 @@
         "label_blocking_unknown": false,
         "serious_false_approval": false,
         "unsafe_false_approval": false,
-        "blocking_unknown_false_approval": false
+        "blocking_unknown_false_approval": false,
+        "serious_issues_expected": 0,
+        "serious_issues_found_by_source": 0
       },
       {
         "asset_id": "cal_002",
@@ -51,7 +55,9 @@
         "label_blocking_unknown": false,
         "serious_false_approval": true,
         "unsafe_false_approval": true,
-        "blocking_unknown_false_approval": false
+        "blocking_unknown_false_approval": false,
+        "serious_issues_expected": 2,
+        "serious_issues_found_by_source": 0
       },
       {
         "asset_id": "cal_003",
@@ -68,7 +74,9 @@
         "label_blocking_unknown": false,
         "serious_false_approval": false,
         "unsafe_false_approval": false,
-        "blocking_unknown_false_approval": false
+        "blocking_unknown_false_approval": false,
+        "serious_issues_expected": 1,
+        "serious_issues_found_by_source": 1
       },
       {
         "asset_id": "cal_004",
@@ -85,7 +93,9 @@
         "label_blocking_unknown": false,
         "serious_false_approval": false,
         "unsafe_false_approval": false,
-        "blocking_unknown_false_approval": false
+        "blocking_unknown_false_approval": false,
+        "serious_issues_expected": 0,
+        "serious_issues_found_by_source": 0
       },
       {
         "asset_id": "cal_005",
@@ -103,7 +113,9 @@
         "label_blocking_unknown": true,
         "serious_false_approval": false,
         "unsafe_false_approval": true,
-        "blocking_unknown_false_approval": true
+        "blocking_unknown_false_approval": true,
+        "serious_issues_expected": 0,
+        "serious_issues_found_by_source": 0
       },
       {
         "asset_id": "cal_006",
@@ -120,7 +132,9 @@
         "label_blocking_unknown": false,
         "serious_false_approval": false,
         "unsafe_false_approval": false,
-        "blocking_unknown_false_approval": false
+        "blocking_unknown_false_approval": false,
+        "serious_issues_expected": 0,
+        "serious_issues_found_by_source": 0
       }
     ]
   },
@@ -133,6 +147,7 @@
     "unsafe_false_approvals": 2,
     "blocking_unknown_false_approvals": 1,
     "unsafe_case_detection_rate": 0.333,
+    "general_serious_issue_source_recall": 0.333,
     "per_case": [
       {
         "asset_id": "cal_001",
@@ -149,7 +164,9 @@
         "label_blocking_unknown": false,
         "serious_false_approval": false,
         "unsafe_false_approval": false,
-        "blocking_unknown_false_approval": false
+        "blocking_unknown_false_approval": false,
+        "serious_issues_expected": 0,
+        "serious_issues_found_by_source": 0
       },
       {
         "asset_id": "cal_002",
@@ -166,7 +183,9 @@
         "label_blocking_unknown": false,
         "serious_false_approval": true,
         "unsafe_false_approval": true,
-        "blocking_unknown_false_approval": false
+        "blocking_unknown_false_approval": false,
+        "serious_issues_expected": 2,
+        "serious_issues_found_by_source": 0
       },
       {
         "asset_id": "cal_003",
@@ -183,7 +202,9 @@
         "label_blocking_unknown": false,
         "serious_false_approval": false,
         "unsafe_false_approval": false,
-        "blocking_unknown_false_approval": false
+        "blocking_unknown_false_approval": false,
+        "serious_issues_expected": 1,
+        "serious_issues_found_by_source": 1
       },
       {
         "asset_id": "cal_004",
@@ -200,7 +221,9 @@
         "label_blocking_unknown": false,
         "serious_false_approval": false,
         "unsafe_false_approval": false,
-        "blocking_unknown_false_approval": false
+        "blocking_unknown_false_approval": false,
+        "serious_issues_expected": 0,
+        "serious_issues_found_by_source": 0
       },
       {
         "asset_id": "cal_005",
@@ -218,7 +241,9 @@
         "label_blocking_unknown": true,
         "serious_false_approval": false,
         "unsafe_false_approval": true,
-        "blocking_unknown_false_approval": true
+        "blocking_unknown_false_approval": true,
+        "serious_issues_expected": 0,
+        "serious_issues_found_by_source": 0
       },
       {
         "asset_id": "cal_006",
@@ -235,7 +260,9 @@
         "label_blocking_unknown": false,
         "serious_false_approval": false,
         "unsafe_false_approval": false,
-        "blocking_unknown_false_approval": false
+        "blocking_unknown_false_approval": false,
+        "serious_issues_expected": 0,
+        "serious_issues_found_by_source": 0
       }
     ]
   },
@@ -245,26 +272,29 @@
     "acceptable_verdict_accuracy": 0.0,
     "serious_false_approvals": 0,
     "unsafe_false_approvals": 0,
-    "blocking_unknown_false_approvals": 0
+    "blocking_unknown_false_approvals": 0,
+    "general_serious_issue_source_recall": 0.0
   },
   "regressions": [],
-  "acceptance_gate": {
+  "non_regression_gate": {
     "model": "google-gemini-3-1-flash-lite",
     "passed": true,
     "checks": {
-      "processing_success_rate_is_1": true,
+      "processing_success_rates_are_1": true,
       "no_regressions": true,
       "unsafe_false_approvals_not_worse": true,
-      "blocking_unknown_false_approvals_not_worse": true
+      "blocking_unknown_false_approvals_not_worse": true,
+      "general_serious_issue_source_recall_not_worse": true
     }
   },
+  "improved_metrics": [],
   "operational": {
     "model": "google-gemini-3-1-flash-lite",
     "total_calls": 19,
     "total_retries": 1,
     "total_prompt_tokens": 176606,
     "total_completion_tokens": 2657,
-    "runtime_s": 52.261,
+    "runtime_s": 65.036,
     "cost_usd": 0.048136,
     "cost_status": "complete"
   }

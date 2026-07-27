@@ -68,37 +68,49 @@ uv run --locked python -m solution evaluate \
 | Files | Role |
 |---|---|
 | `reviews.jsonl`, `evaluation.json` | Required final aliases; Flash Lite only |
-| `evaluation.flash-lite.*` | Current FB-001 pair; PASS; selected final model |
-| `evaluation.gemini-3-5-flash.*` | Current FB-001 comparison; PASS; diagnostic only |
+| `evaluation.flash-lite.*` | Stored Run 4 PASS; selected final |
+| `evaluation.gemini-3-5-flash.*` | Stored Run 4 **FAIL**; comparison only, release blocked |
 
 The tested production change is a general **red clothing-vs-skin disambiguation instruction**
 motivated by FB-001. Baseline and production are separate calls. Both files are re-validated:
 schema + semantics, exact id set (baseline 6, production 12), no unknown/duplicate ids, matching
 `model`/`prompt_version`/`prompt_revision`, and one model per report. Both profiles use the same
 current prompt revisions; model-specific files prevent comparisons from replacing final aliases.
+Flash is canonical for the cost/false-rejection trade-off, not because it is safer: 3.5 has better
+absolute labelled production metrics but is ~10× costlier, repeatedly rejects unlabelled
+`review_001`, and flips `review_005` between reject and ship. Five 3.5 runs gave `.333→.667` PASS,
+`.667→.667` PASS, `.333→.667` PASS, `.333→.667` **FAIL**, then `.333→.667` PASS. Run 4 regressed
+`cal_005` reject→ship; Run 5 held accuracy `.833→.833` and unsafe approvals `1→1`, with the recall
+hit now from major `COLOR-02`. One run does not establish causality: only 4/5 pairs passed, so Run 4
+remains the stored artifact and 3.5 release stays blocked. Run 5 was diagnostic (37 calls, $0.539914).
 
 ### `evaluation.<profile>.json` shape
 
 Compact, no fixed schema:
 
-- `improvement` / `prompt_versions` / `metric_definitions` — the change, what baseline vs production
-  mean, and precise metric definitions.
+- `tested_change` / `prompt_versions` / `metric_definitions` — the candidate change, what baseline
+  vs production mean, and precise metric definitions.
 - `before` / `after` — metrics over the 6 calibration cases: `processing_success_rate`,
   `primary_verdict_accuracy`, `acceptable_verdict_accuracy`, and three distinct false-approval
   counts — `serious_false_approvals` (label has a critical/major issue, shipped),
   `unsafe_false_approvals` (any should-not-ship label, shipped), `blocking_unknown_false_approvals`
-  (shipped despite an expected decision-critical unknown) — plus `unsafe_case_detection_rate` and
-  `per_case` (predicted vs labelled verdict, with per-metric flags).
+  (shipped despite an expected decision-critical unknown) — plus `unsafe_case_detection_rate`,
+  `general_serious_issue_source_recall` (all labelled serious issues matched by major/critical
+  findings sharing a source ID; not FB-001-specific), and auditable `per_case` rows.
 - `deltas` — after − before for the scalar metrics.
 - `regressions` — cases correct (by acceptable verdict) in baseline but wrong in production.
-- `acceptance_gate` — per-model PASS only when production processing succeeds completely, has no
-  regressions, and does not increase unsafe or blocking-unknown false approvals versus baseline.
+- `non_regression_gate` — PASS only when baseline and production both fully process, with no
+  regressions, non-increasing unsafe/blocking approvals, and non-decreasing general recall.
+- `improved_metrics` — individual direction-positive deltas, not an overall judgement; always empty
+  for an incomplete pair.
 - `operational` — `model`, `total_calls`, `total_retries`, token totals, `runtime_s`, `cost_usd`,
   `cost_status` (`complete` / `partial_unavailable`).
 
 `per_case` shows predicted vs labelled verdict for every calibration asset, so any label
 disagreement is visible there and explained (without altering the label) in `SUMMARY_NOTE.md`.
-`evaluate` always writes the report, then exits non-zero if its model fails `acceptance_gate`.
+`evaluate` always writes the report, then exits non-zero on `non_regression_gate` failure. Console
+output names any individual `positive_deltas`; it never calls them overall improvement. PASS means
+“not worse than baseline,” never automatic permission to ship; final approval remains human.
 
 ## Tests
 
@@ -106,7 +118,7 @@ disagreement is visible there and explained (without altering the label) in `SUM
 uv run --locked python -m unittest discover -s tests
 ```
 
-Offline only — the model is always injected. 48 tests cover partial-batch failure isolation,
+Offline only — the model is always injected. 50 tests cover partial-batch failure isolation,
 truncation and unavailable-cost handling, the hardened semantic guardrails (missing/non-unique
 check fields, verdict precedence, external-authority), production prompt isolation, the three
 false-approval metrics, reused-file validation (exact id sets / required fields / single
@@ -114,9 +126,9 @@ model), fail-fast loading, request assembly, prompt hygiene, and a missing API k
 
 ## Expected API cost
 
-A full loop is **12 production + 6 baseline calls** per model, plus bounded repairs. The fresh paired
-comparison used 19 Flash Lite calls (one repair) and 18 Gemini 3.5 Flash calls: **37 calls,
-$0.528472 total** (~$0.57 expected). Settings use `temperature=0`, `max_tokens=8192`. Cost is
+A full loop is **12 production + 6 baseline calls** per model, plus bounded repairs. Stored Run 4
+used 19 Flash Lite calls (one repair) and 18 Gemini 3.5 Flash calls: **37 calls, $0.560799 total**
+(~$0.57 expected). Settings use `temperature=0`, `max_tokens=8192`. Cost is
 computed from response token usage × the model's published per-token price (Runware reports usage,
 not cost); unavailable prices are `null` with `cost_status`, never fake $0. Each model report stores
 its own `operational` totals; `evaluation.json` is the Flash Lite final alias.
@@ -134,9 +146,8 @@ its own `operational` totals; `evaluation.json` is the Flash Lite final alias.
   and semantic rules with strict **verdict precedence** (reject > unsupported > human_review > ship):
   every unverifiable check must carry category/decision_critical/unique source_ids; `ship`/`reject`
   require a null `blocking_reason`; a decision-critical external requirement can never ship. One
-  bounded repair retry, else a schema-valid `provider_error`, and the batch continues. Production
-  is accepted per model only with 100% processing, no regressions, and no increase in unsafe or
-  blocking-unknown false approvals.
+  bounded repair retry, else a schema-valid `provider_error`, and the batch continues. Evaluation
+  non-regression and individual positive deltas are reported separately per model.
 - **Color/clothing disambiguation.** The one production addition generalizes FB-001: when a large
   red field could be clothing or exposed skin, inspect boundaries, limb ownership, and overlap;
   apply COLOR-02/CHAR-02 only from concrete relationships, never red alone. It adds no fields or

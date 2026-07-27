@@ -3,21 +3,23 @@
     "baseline": "no explicit red clothing-vs-skin disambiguation instruction",
     "production": "+ inspect boundaries/ownership/overlap before applying COLOR-02/CHAR-02"
   },
-  "improvement": "general color/clothing disambiguation instruction (motivated by FB-001)",
+  "tested_change": "general color/clothing disambiguation instruction (motivated by FB-001)",
   "metric_definitions": {
     "serious_false_approvals": "ship where the label has a critical/major expected issue",
     "unsafe_false_approvals": "ship where the label is reject/human_review/unsupported",
-    "blocking_unknown_false_approvals": "ship where the label expects a decision-critical unknown"
+    "blocking_unknown_false_approvals": "ship where the label expects a decision-critical unknown",
+    "general_serious_issue_source_recall": "fraction of all labelled serious issues matched by a returned major/critical issue sharing at least one source_id; not specific to FB-001"
   },
   "before": {
     "n_cases": 6,
     "processing_success_rate": 1.0,
     "primary_verdict_accuracy": 0.833,
-    "acceptable_verdict_accuracy": 0.833,
+    "acceptable_verdict_accuracy": 1.0,
     "serious_false_approvals": 0,
-    "unsafe_false_approvals": 1,
-    "blocking_unknown_false_approvals": 1,
-    "unsafe_case_detection_rate": 0.667,
+    "unsafe_false_approvals": 0,
+    "blocking_unknown_false_approvals": 0,
+    "unsafe_case_detection_rate": 1.0,
+    "general_serious_issue_source_recall": 0.333,
     "per_case": [
       {
         "asset_id": "cal_001",
@@ -34,7 +36,9 @@
         "label_blocking_unknown": false,
         "serious_false_approval": false,
         "unsafe_false_approval": false,
-        "blocking_unknown_false_approval": false
+        "blocking_unknown_false_approval": false,
+        "serious_issues_expected": 0,
+        "serious_issues_found_by_source": 0
       },
       {
         "asset_id": "cal_002",
@@ -51,7 +55,9 @@
         "label_blocking_unknown": false,
         "serious_false_approval": false,
         "unsafe_false_approval": false,
-        "blocking_unknown_false_approval": false
+        "blocking_unknown_false_approval": false,
+        "serious_issues_expected": 2,
+        "serious_issues_found_by_source": 0
       },
       {
         "asset_id": "cal_003",
@@ -68,7 +74,9 @@
         "label_blocking_unknown": false,
         "serious_false_approval": false,
         "unsafe_false_approval": false,
-        "blocking_unknown_false_approval": false
+        "blocking_unknown_false_approval": false,
+        "serious_issues_expected": 1,
+        "serious_issues_found_by_source": 1
       },
       {
         "asset_id": "cal_004",
@@ -85,11 +93,13 @@
         "label_blocking_unknown": false,
         "serious_false_approval": false,
         "unsafe_false_approval": false,
-        "blocking_unknown_false_approval": false
+        "blocking_unknown_false_approval": false,
+        "serious_issues_expected": 0,
+        "serious_issues_found_by_source": 0
       },
       {
         "asset_id": "cal_005",
-        "predicted_verdict": "ship",
+        "predicted_verdict": "reject",
         "predicted_status": "completed",
         "label_primary_verdict": "human_review",
         "label_acceptable_verdicts": [
@@ -97,13 +107,15 @@
           "reject"
         ],
         "correct_primary": false,
-        "correct_acceptable": false,
+        "correct_acceptable": true,
         "label_serious": false,
         "label_unsafe": true,
         "label_blocking_unknown": true,
         "serious_false_approval": false,
-        "unsafe_false_approval": true,
-        "blocking_unknown_false_approval": true
+        "unsafe_false_approval": false,
+        "blocking_unknown_false_approval": false,
+        "serious_issues_expected": 0,
+        "serious_issues_found_by_source": 0
       },
       {
         "asset_id": "cal_006",
@@ -120,7 +132,9 @@
         "label_blocking_unknown": false,
         "serious_false_approval": false,
         "unsafe_false_approval": false,
-        "blocking_unknown_false_approval": false
+        "blocking_unknown_false_approval": false,
+        "serious_issues_expected": 0,
+        "serious_issues_found_by_source": 0
       }
     ]
   },
@@ -133,6 +147,7 @@
     "unsafe_false_approvals": 1,
     "blocking_unknown_false_approvals": 1,
     "unsafe_case_detection_rate": 0.667,
+    "general_serious_issue_source_recall": 0.667,
     "per_case": [
       {
         "asset_id": "cal_001",
@@ -149,7 +164,9 @@
         "label_blocking_unknown": false,
         "serious_false_approval": false,
         "unsafe_false_approval": false,
-        "blocking_unknown_false_approval": false
+        "blocking_unknown_false_approval": false,
+        "serious_issues_expected": 0,
+        "serious_issues_found_by_source": 0
       },
       {
         "asset_id": "cal_002",
@@ -166,7 +183,9 @@
         "label_blocking_unknown": false,
         "serious_false_approval": false,
         "unsafe_false_approval": false,
-        "blocking_unknown_false_approval": false
+        "blocking_unknown_false_approval": false,
+        "serious_issues_expected": 2,
+        "serious_issues_found_by_source": 1
       },
       {
         "asset_id": "cal_003",
@@ -183,7 +202,9 @@
         "label_blocking_unknown": false,
         "serious_false_approval": false,
         "unsafe_false_approval": false,
-        "blocking_unknown_false_approval": false
+        "blocking_unknown_false_approval": false,
+        "serious_issues_expected": 1,
+        "serious_issues_found_by_source": 1
       },
       {
         "asset_id": "cal_004",
@@ -200,7 +221,9 @@
         "label_blocking_unknown": false,
         "serious_false_approval": false,
         "unsafe_false_approval": false,
-        "blocking_unknown_false_approval": false
+        "blocking_unknown_false_approval": false,
+        "serious_issues_expected": 0,
+        "serious_issues_found_by_source": 0
       },
       {
         "asset_id": "cal_005",
@@ -218,7 +241,9 @@
         "label_blocking_unknown": true,
         "serious_false_approval": false,
         "unsafe_false_approval": true,
-        "blocking_unknown_false_approval": true
+        "blocking_unknown_false_approval": true,
+        "serious_issues_expected": 0,
+        "serious_issues_found_by_source": 0
       },
       {
         "asset_id": "cal_006",
@@ -235,37 +260,50 @@
         "label_blocking_unknown": false,
         "serious_false_approval": false,
         "unsafe_false_approval": false,
-        "blocking_unknown_false_approval": false
+        "blocking_unknown_false_approval": false,
+        "serious_issues_expected": 0,
+        "serious_issues_found_by_source": 0
       }
     ]
   },
   "deltas": {
     "processing_success_rate": 0.0,
     "primary_verdict_accuracy": 0.0,
-    "acceptable_verdict_accuracy": 0.0,
+    "acceptable_verdict_accuracy": -0.167,
     "serious_false_approvals": 0,
-    "unsafe_false_approvals": 0,
-    "blocking_unknown_false_approvals": 0
+    "unsafe_false_approvals": 1,
+    "blocking_unknown_false_approvals": 1,
+    "general_serious_issue_source_recall": 0.334
   },
-  "regressions": [],
-  "acceptance_gate": {
+  "regressions": [
+    {
+      "asset_id": "cal_005",
+      "baseline_verdict": "reject",
+      "production_verdict": "ship"
+    }
+  ],
+  "non_regression_gate": {
     "model": "google-gemini-3-5-flash",
-    "passed": true,
+    "passed": false,
     "checks": {
-      "processing_success_rate_is_1": true,
-      "no_regressions": true,
-      "unsafe_false_approvals_not_worse": true,
-      "blocking_unknown_false_approvals_not_worse": true
+      "processing_success_rates_are_1": true,
+      "no_regressions": false,
+      "unsafe_false_approvals_not_worse": false,
+      "blocking_unknown_false_approvals_not_worse": false,
+      "general_serious_issue_source_recall_not_worse": true
     }
   },
+  "improved_metrics": [
+    "general_serious_issue_source_recall"
+  ],
   "operational": {
     "model": "google-gemini-3-5-flash",
     "total_calls": 18,
     "total_retries": 0,
     "total_prompt_tokens": 167249,
-    "total_completion_tokens": 25496,
-    "runtime_s": 191.775,
-    "cost_usd": 0.480336,
+    "total_completion_tokens": 29088,
+    "runtime_s": 224.765,
+    "cost_usd": 0.512663,
     "cost_status": "complete"
   }
 }

@@ -398,10 +398,10 @@ def _image_part(data: bytes) -> dict:
 
 
 def build_messages(brand_sources: dict, brief: dict, image: bytes, signals: dict) -> list:
-    improvement = (_COLOR_CLOTHING_INSTRUCTION
-                   if brand_sources["prompt_version"] == "production" else "")
+    addition = (_COLOR_CLOTHING_INSTRUCTION
+                if brand_sources["prompt_version"] == "production" else "")
     system = _SYSTEM_PROMPT.format(
-        subjective=improvement,
+        subjective=addition,
         guide=brand_sources["guide_text"],
         clarifications=json.dumps(brand_sources["approved_clarifications"]),
         ref_descriptions=brand_sources["reference_descriptions"],
@@ -798,6 +798,12 @@ def _metrics(preds: dict[str, dict], labels: dict[str, dict]) -> dict:
         if flags["unsafe"]:
             unsafe_total += 1
             unsafe_detected += int(is_completed and verdict != "ship")
+        expected_serious = label.get("serious_issues", [])
+        predicted_serious = [i for i in pred.get("issues", [])
+                             if i.get("severity") in {"critical", "major"}]
+        found = sum(any(set(expected.get("source_ids", [])) & set(actual.get("source_ids", []))
+                        for actual in predicted_serious)
+                    for expected in expected_serious)
         per_case.append({
             "asset_id": aid,
             "predicted_verdict": verdict,
@@ -812,8 +818,12 @@ def _metrics(preds: dict[str, dict], labels: dict[str, dict]) -> dict:
             "serious_false_approval": flags["serious"] and shipped,
             "unsafe_false_approval": flags["unsafe"] and shipped,
             "blocking_unknown_false_approval": flags["blocking_unknown"] and shipped,
+            "serious_issues_expected": len(expected_serious),
+            "serious_issues_found_by_source": found,
         })
     n = len(cal_ids)
+    serious_issues_found = sum(c["serious_issues_found_by_source"] for c in per_case)
+    serious_issues_expected = sum(c["serious_issues_expected"] for c in per_case)
     return {
         "n_cases": n,
         "processing_success_rate": round(completed / n, 3) if n else 0.0,
@@ -826,6 +836,9 @@ def _metrics(preds: dict[str, dict], labels: dict[str, dict]) -> dict:
         # shipped despite an expected decision-critical unknown
         "blocking_unknown_false_approvals": blocking_unknown_fa,
         "unsafe_case_detection_rate": round(unsafe_detected / unsafe_total, 3) if unsafe_total else None,
+        "general_serious_issue_source_recall": (
+            round(serious_issues_found / serious_issues_expected, 3)
+            if serious_issues_expected else None),
         "per_case": per_case,
     }
 
@@ -834,15 +847,22 @@ def _cal_predictions(records: list[dict], cal_ids: set[str]) -> dict[str, dict]:
     return {r["asset_id"]: r for r in records if r["asset_id"] in cal_ids}
 
 
-def _acceptance_gate(before: dict, after: dict, regressions: list[dict], model: str | None) -> dict:
+def _non_regression_gate(before: dict, after: dict, regressions: list[dict], model: str | None) -> dict:
+    before_recall = before["general_serious_issue_source_recall"]
+    after_recall = after["general_serious_issue_source_recall"]
     checks = {
-        "processing_success_rate_is_1": after["processing_success_rate"] == 1,
+        "processing_success_rates_are_1": (
+            before["processing_success_rate"] == after["processing_success_rate"] == 1),
         "no_regressions": not regressions,
         "unsafe_false_approvals_not_worse": (
             after["unsafe_false_approvals"] <= before["unsafe_false_approvals"]),
         "blocking_unknown_false_approvals_not_worse": (
             after["blocking_unknown_false_approvals"]
             <= before["blocking_unknown_false_approvals"]),
+        "general_serious_issue_source_recall_not_worse": (
+            (before_recall is None and after_recall is None)
+            or (before_recall is not None and after_recall is not None
+                and after_recall >= before_recall)),
     }
     return {"model": model, "passed": all(checks.values()), "checks": checks}
 
@@ -851,7 +871,7 @@ def evaluate(pack: TaskPack, baseline_records: list[dict],
              production_records: list[dict]) -> dict:
     """Compact before/after metrics on the six calibration assets.
 
-    Improvement = the production pipeline's general red clothing-vs-skin disambiguation
+    Tested change = the production pipeline's general red clothing-vs-skin disambiguation
     instruction, motivated by FB-001. Baseline omits it. Per-case rows make every
     difference auditable.
     """
@@ -861,11 +881,21 @@ def evaluate(pack: TaskPack, baseline_records: list[dict],
 
     scalar_keys = ["processing_success_rate", "primary_verdict_accuracy",
                    "acceptable_verdict_accuracy", "serious_false_approvals",
-                   "unsafe_false_approvals", "blocking_unknown_false_approvals"]
+                   "unsafe_false_approvals", "blocking_unknown_false_approvals",
+                   "general_serious_issue_source_recall"]
     deltas = {}
     for k in scalar_keys:
         b, a = before[k], after[k]
         deltas[k] = round(a - b, 3) if isinstance(a, (int, float)) and isinstance(b, (int, float)) else None
+    improved_metrics = [
+        key for key, direction in {
+            "acceptable_verdict_accuracy": 1,
+            "serious_false_approvals": -1,
+            "unsafe_false_approvals": -1,
+            "blocking_unknown_false_approvals": -1,
+            "general_serious_issue_source_recall": 1,
+        }.items() if (deltas[key] or 0) * direction > 0
+    ] if before["processing_success_rate"] == after["processing_success_rate"] == 1 else []
 
     # Regressions: acceptable in baseline, wrong in production.
     regressions = []
@@ -903,17 +933,22 @@ def evaluate(pack: TaskPack, baseline_records: list[dict],
             "baseline": "no explicit red clothing-vs-skin disambiguation instruction",
             "production": "+ inspect boundaries/ownership/overlap before applying COLOR-02/CHAR-02",
         },
-        "improvement": "general color/clothing disambiguation instruction (motivated by FB-001)",
+        "tested_change": "general color/clothing disambiguation instruction (motivated by FB-001)",
         "metric_definitions": {
             "serious_false_approvals": "ship where the label has a critical/major expected issue",
             "unsafe_false_approvals": "ship where the label is reject/human_review/unsupported",
             "blocking_unknown_false_approvals": "ship where the label expects a decision-critical unknown",
+            "general_serious_issue_source_recall": (
+                "fraction of all labelled serious issues matched by a returned major/critical "
+                "issue sharing at least one source_id; not specific to FB-001"),
         },
         "before": before,
         "after": after,
         "deltas": deltas,
         "regressions": regressions,
-        "acceptance_gate": _acceptance_gate(before, after, regressions, operational["model"]),
+        "non_regression_gate": _non_regression_gate(before, after, regressions,
+                                                    operational["model"]),
+        "improved_metrics": improved_metrics,
         "operational": operational,
     }
 

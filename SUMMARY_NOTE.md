@@ -36,35 +36,33 @@ or exposed skin, inspect boundaries, limb ownership, and overlap; apply COLOR-02
 concrete visible relationships, never red alone. It adds no output fields or model branch. Baseline
 omits only this instruction; before/after are separate live runs.
 
-I split false approvals into three metrics because "any non-ship" conflates distinct failures:
+False approvals separate safety failures. General issue-source recall covers every labelled serious
+issue—not FB-001 specifically—and labels never enter prompts:
 
 | Metric — 6 calibration | Flash B | Flash P | 3.5 B | 3.5 P |
 |---|---:|---:|---:|---:|
-| Acceptable accuracy | .667 | .667 | .833 | **.833** |
+| Acceptable accuracy | .667 | .667 | 1.000 | **.833** |
 | Serious false approvals | 1 | 1 | 0 | **0** |
-| Unsafe false approvals | 2 | 2 | 1 | **1** |
-| Blocking-unknown FA | 1 | 1 | 1 | 1 |
+| Unsafe false approvals | 2 | 2 | 0 | **1** |
+| Blocking-unknown FA | 1 | 1 | 0 | 1 |
+| General serious-issue source recall | .333 | .333 | .333 | **.667** |
 
-Neither model changed versus its own baseline; both gates pass. 3.5 production is absolutely better
-than Flash (`.833` vs `.667`) and catches **cal_002**, but both still ship **cal_005**. Thus FB-001
-added no measured lift; the difference is model capability, not the feedback-driven change.
+Stored Run 4: Flash PASS; 3.5 **FAIL** as `cal_005` regressed reject→ship. Five 3.5 runs were
+`.333→.667` PASS, `.667→.667` PASS, `.333→.667` PASS, `.333→.667` FAIL, `.333→.667` PASS.
+Run 5 held accuracy `.833→.833` and both unsafe counts `1→1`; its hit was major `COLOR-02`, but one
+run does not prove causality. Only 4/5 passed, so Run 4 remains stored and dual-model release stays blocked.
 
 ## Limitations
 
-- **Historical FB-002 regression**: on 3.5 it changed accuracy 1.000→.833 and unsafe / blocking FA
-  0→1 (`cal_005` human_review→ship). That gate was removed, not branched by model.
-- **3.5 is not yet a safe canonical upgrade**: the current FB-001 pair passes, but `cal_005` remains
-  unsafe and production falsely rejects unlabelled `review_001` as holding a duster. One run is not
-  enough to override that variance.
-- **Artifact provenance**: current model-scoped files use current revisions; `reviews.jsonl` and
-  `evaluation.json` remain Flash final aliases. Revisions cover system/user/addition/repair templates.
-- **cal_005** remains a blocking-unknown false approval; the new instruction deliberately does not
-  turn generic comfort language into evidence.
-- **cal_002**: flash-lite ships a bicycle with mechanical linework + a large red torso (visible
-  STYLE-02/COLOR-02) it does not report — the main remaining serious false approval
-  (gemini-3-5-flash catches it).
-- **Unlabelled Flash diagnostics**: `review_003` ships despite the loading action being absent;
-  `review_004` ships despite dance-vs-clutch ambiguity. They are not treated as ground truth.
+- **Historical FB-002 regression**: on 3.5 it changed accuracy 1.000→.833 and both unsafe counts
+  0→1 on `cal_005`; that gate was removed, not model-branched.
+- Both models ship **cal_005**; Flash also ships labelled **cal_002** and unlabelled `review_003`.
+  Both ship ambiguous `review_004`; neither is safe for unattended auto-approval.
+- 3.5 catches `cal_002`/`review_003`, but adds a dubious prop-unrecognizable claim and falsely
+  rejects unlabelled `review_001` as a duster; `review_005` oscillates reject/ship and shipped in
+  Run 5. These are diagnostic disagreements, not ground truth.
+- **Artifact provenance**: model-scoped files use current revisions covering system/user/addition /
+  repair templates; `reviews.jsonl` and `evaluation.json` remain Flash final aliases.
 
 ## Design choices
 
@@ -73,8 +71,8 @@ added no measured lift; the difference is model capability, not the feedback-dri
 - **Hardened validation**: schema + verdict precedence (reject > unsupported > human_review > ship);
   every unverifiable check needs category/decision_critical/unique source_ids; `ship`/`reject` need
   null `blocking_reason`; a decision-critical external requirement can never ship; required copy
-  cannot be silently dropped. One bounded repair retry, else `provider_error`. Per-model acceptance
-  requires full processing, no regressions, and non-increasing unsafe/blocking-unknown approvals.
+  cannot be silently dropped. One bounded repair retry, else `provider_error`. Non-regression and
+  individual positive deltas are separate; neither authorizes auto-ship—humans decide.
 - **Failure-safe** sequential batch, per-record isolation, flush per line; images never deduplicated.
 - **Cost** from token usage × the model's published price; unavailable pricing/usage → `null`
   (`cost_status`), never faked as $0. `max_tokens=8192` with `finish_reason` truncation detection
@@ -86,20 +84,21 @@ added no measured lift; the difference is model capability, not the feedback-dri
   policy_effect/superseded_by, undecodable references) before any paid call.
 - **Single prompt source**: system/user/repair templates live in `core.py`; `dump-prompt` prints them.
 
-## Model & operations
+## Stored Run 4 & operations
 
-| Model | Calls | Runtime | Cost | Gate |
+| Model | Calls | Runtime | Cost | Gate / positive deltas |
 |---|---:|---:|---:|---|
-| Flash Lite | 19 (1 repair) | 52 s | $0.048136 | PASS |
-| Gemini 3.5 Flash | 18 | 192 s | $0.480336 | PASS |
-| **Total** | **37** | **244 s** | **$0.528472** | |
+| Flash Lite | 19 (1 repair) | 65 s | $0.048136 | PASS / none |
+| Gemini 3.5 Flash | 18 | 225 s | $0.512663 | **FAIL** / general recall |
+| **Total** | **37** | **290 s** | **$0.560799** | |
 
-Both used the same current revisions and `temperature=0`. Canonical aliases remain Flash Lite.
+Both use the same revisions and `temperature=0`. Flash remains canonical for ~10× lower cost and
+fewer unlabelled false rejects—not because it is safer; known absolute false approvals remain.
 
 ## Most useful next improvement
 
-Repeat paired runs to measure verdict stability, especially `cal_005`/`review_001`, before changing
-the canonical model; collect owner-labelled color/limb-boundary examples.
+Get owner labels for `cal_005`/`review_001`/`review_005`; fix the blocker before changing model or
+enabling automated approval, rather than rerunning for a favourable sample.
 
 ## What generalizes beyond Bubble
 
