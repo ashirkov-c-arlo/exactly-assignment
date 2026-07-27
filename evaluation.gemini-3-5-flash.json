@@ -293,9 +293,6 @@
       "general_serious_issue_source_recall_not_worse": true
     }
   },
-  "improved_metrics": [
-    "general_serious_issue_source_recall"
-  ],
   "operational": {
     "model": "google-gemini-3-5-flash",
     "total_calls": 18,

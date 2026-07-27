@@ -68,15 +68,13 @@ def cmd_evaluate(args):
     Path(args.output).write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
     d = report["deltas"]
     gate = report["non_regression_gate"]
-    improved_metrics = report["improved_metrics"]
     print(f"Wrote {args.output}. acceptable accuracy "
           f"{report['before']['acceptable_verdict_accuracy']} -> "
           f"{report['after']['acceptable_verdict_accuracy']} "
           f"(delta {d['acceptable_verdict_accuracy']}); "
           f"unsafe false approvals {report['before']['unsafe_false_approvals']} -> "
           f"{report['after']['unsafe_false_approvals']}; "
-          f"non_regression={'PASS' if gate['passed'] else 'FAIL'}; "
-          f"positive_deltas={','.join(improved_metrics) or 'none'}.")
+          f"non_regression={'PASS' if gate['passed'] else 'FAIL'}.")
     if not gate["passed"]:
         failed = ", ".join(name for name, passed in gate["checks"].items() if not passed)
         sys.exit(f"error: production failed non-regression gate for {gate['model']!r}: {failed}")

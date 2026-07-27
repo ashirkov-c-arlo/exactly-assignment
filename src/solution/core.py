@@ -887,16 +887,6 @@ def evaluate(pack: TaskPack, baseline_records: list[dict],
     for k in scalar_keys:
         b, a = before[k], after[k]
         deltas[k] = round(a - b, 3) if isinstance(a, (int, float)) and isinstance(b, (int, float)) else None
-    improved_metrics = [
-        key for key, direction in {
-            "acceptable_verdict_accuracy": 1,
-            "serious_false_approvals": -1,
-            "unsafe_false_approvals": -1,
-            "blocking_unknown_false_approvals": -1,
-            "general_serious_issue_source_recall": 1,
-        }.items() if (deltas[key] or 0) * direction > 0
-    ] if before["processing_success_rate"] == after["processing_success_rate"] == 1 else []
-
     # Regressions: acceptable in baseline, wrong in production.
     regressions = []
     b_by_id = {c["asset_id"]: c for c in before["per_case"]}
@@ -948,7 +938,6 @@ def evaluate(pack: TaskPack, baseline_records: list[dict],
         "regressions": regressions,
         "non_regression_gate": _non_regression_gate(before, after, regressions,
                                                     operational["model"]),
-        "improved_metrics": improved_metrics,
         "operational": operational,
     }
 

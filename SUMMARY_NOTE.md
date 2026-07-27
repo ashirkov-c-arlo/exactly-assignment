@@ -71,8 +71,8 @@ run does not prove causality. Only 4/5 passed, so Run 4 remains stored and dual-
 - **Hardened validation**: schema + verdict precedence (reject > unsupported > human_review > ship);
   every unverifiable check needs category/decision_critical/unique source_ids; `ship`/`reject` need
   null `blocking_reason`; a decision-critical external requirement can never ship; required copy
-  cannot be silently dropped. One bounded repair retry, else `provider_error`. Non-regression and
-  individual positive deltas are separate; neither authorizes auto-ship—humans decide.
+  cannot be silently dropped. One bounded repair retry, else `provider_error`. Non-regression never
+  authorizes auto-ship—humans decide.
 - **Failure-safe** sequential batch, per-record isolation, flush per line; images never deduplicated.
 - **Cost** from token usage × the model's published price; unavailable pricing/usage → `null`
   (`cost_status`), never faked as $0. `max_tokens=8192` with `finish_reason` truncation detection
@@ -86,10 +86,10 @@ run does not prove causality. Only 4/5 passed, so Run 4 remains stored and dual-
 
 ## Stored Run 4 & operations
 
-| Model | Calls | Runtime | Cost | Gate / positive deltas |
+| Model | Calls | Runtime | Cost | Gate |
 |---|---:|---:|---:|---|
-| Flash Lite | 19 (1 repair) | 65 s | $0.048136 | PASS / none |
-| Gemini 3.5 Flash | 18 | 225 s | $0.512663 | **FAIL** / general recall |
+| Flash Lite | 19 (1 repair) | 65 s | $0.048136 | PASS |
+| Gemini 3.5 Flash | 18 | 225 s | $0.512663 | **FAIL** |
 | **Total** | **37** | **290 s** | **$0.560799** | |
 
 Both use the same revisions and `temperature=0`. Flash remains canonical for ~10× lower cost and

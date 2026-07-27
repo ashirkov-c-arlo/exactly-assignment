@@ -2,7 +2,7 @@
 
 Covers batch failure-safety, hardened semantic guardrails (missing fields, verdict
 precedence, external-authority, unique check source_ids), the production color/clothing
-instruction, false-approval/issue-recall metrics, non-regression/lift reporting,
+instruction, false-approval/issue-recall metrics, non-regression evaluation,
 reused-file validation (exact ID sets / required fields / single model), truncation and
 unknown-cost handling, fail-fast loading, request assembly, and prompt hygiene.
 Run: uv run --locked python -m unittest discover -s tests
@@ -294,21 +294,6 @@ class TestMetrics(unittest.TestCase):
         self.assertFalse(gate["checks"]["unsafe_false_approvals_not_worse"])
         self.assertFalse(gate["checks"]["blocking_unknown_false_approvals_not_worse"])
         self.assertFalse(gate["checks"]["general_serious_issue_source_recall_not_worse"])
-
-    def test_improved_metrics_filter_signed_deltas(self):
-        pack = core.load_task_pack(PACK)
-        baseline = [{"asset_id": aid, "processing_status": "completed", "verdict": "ship",
-                     "issues": []} for aid in pack.calibration_labels]
-        production = [dict(r) for r in baseline]
-        next(r for r in production if r["asset_id"] == "cal_002")["issues"] = [
-            {"severity": "major", "source_ids": ["COLOR-02"]}]
-        next(r for r in production if r["asset_id"] == "cal_003")["issues"] = [
-            {"severity": "major", "source_ids": ["POSE-01"]}]
-        self.assertEqual(core.evaluate(pack, baseline, baseline)["improved_metrics"], [])
-        self.assertEqual(core.evaluate(pack, baseline, production)["improved_metrics"],
-                         ["general_serious_issue_source_recall"])
-        baseline[0]["processing_status"] = "provider_error"
-        self.assertEqual(core.evaluate(pack, baseline, production)["improved_metrics"], [])
 
 
 class TestIndependentIdenticalImages(unittest.TestCase):

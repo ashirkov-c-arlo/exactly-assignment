@@ -76,13 +76,9 @@ motivated by FB-001. Baseline and production are separate calls. Both files are 
 schema + semantics, exact id set (baseline 6, production 12), no unknown/duplicate ids, matching
 `model`/`prompt_version`/`prompt_revision`, and one model per report. Both profiles use the same
 current prompt revisions; model-specific files prevent comparisons from replacing final aliases.
-Flash is canonical for the cost/false-rejection trade-off, not because it is safer: 3.5 has better
-absolute labelled production metrics but is ~10× costlier, repeatedly rejects unlabelled
-`review_001`, and flips `review_005` between reject and ship. Five 3.5 runs gave `.333→.667` PASS,
-`.667→.667` PASS, `.333→.667` PASS, `.333→.667` **FAIL**, then `.333→.667` PASS. Run 4 regressed
-`cal_005` reject→ship; Run 5 held accuracy `.833→.833` and unsafe approvals `1→1`, with the recall
-hit now from major `COLOR-02`. One run does not establish causality: only 4/5 pairs passed, so Run 4
-remains the stored artifact and 3.5 release stays blocked. Run 5 was diagnostic (37 calls, $0.539914).
+Flash is canonical for the cost/false-rejection trade-off, not because it is safer. The stored 3.5
+comparison fails non-regression, so its release remains blocked; experiment history is in
+`SUMMARY_NOTE.md`.
 
 ### `evaluation.<profile>.json` shape
 
@@ -101,16 +97,13 @@ Compact, no fixed schema:
 - `regressions` — cases correct (by acceptable verdict) in baseline but wrong in production.
 - `non_regression_gate` — PASS only when baseline and production both fully process, with no
   regressions, non-increasing unsafe/blocking approvals, and non-decreasing general recall.
-- `improved_metrics` — individual direction-positive deltas, not an overall judgement; always empty
-  for an incomplete pair.
 - `operational` — `model`, `total_calls`, `total_retries`, token totals, `runtime_s`, `cost_usd`,
   `cost_status` (`complete` / `partial_unavailable`).
 
 `per_case` shows predicted vs labelled verdict for every calibration asset, so any label
 disagreement is visible there and explained (without altering the label) in `SUMMARY_NOTE.md`.
-`evaluate` always writes the report, then exits non-zero on `non_regression_gate` failure. Console
-output names any individual `positive_deltas`; it never calls them overall improvement. PASS means
-“not worse than baseline,” never automatic permission to ship; final approval remains human.
+`evaluate` always writes the report, then exits non-zero on `non_regression_gate` failure. PASS
+means “not worse than baseline,” never automatic permission to ship; final approval remains human.
 
 ## Tests
 
@@ -118,7 +111,7 @@ output names any individual `positive_deltas`; it never calls them overall impro
 uv run --locked python -m unittest discover -s tests
 ```
 
-Offline only — the model is always injected. 50 tests cover partial-batch failure isolation,
+Offline only — the model is always injected. 49 tests cover partial-batch failure isolation,
 truncation and unavailable-cost handling, the hardened semantic guardrails (missing/non-unique
 check fields, verdict precedence, external-authority), production prompt isolation, the three
 false-approval metrics, reused-file validation (exact id sets / required fields / single
@@ -147,7 +140,7 @@ its own `operational` totals; `evaluation.json` is the Flash Lite final alias.
   every unverifiable check must carry category/decision_critical/unique source_ids; `ship`/`reject`
   require a null `blocking_reason`; a decision-critical external requirement can never ship. One
   bounded repair retry, else a schema-valid `provider_error`, and the batch continues. Evaluation
-  non-regression and individual positive deltas are reported separately per model.
+  non-regression is reported separately per model.
 - **Color/clothing disambiguation.** The one production addition generalizes FB-001: when a large
   red field could be clothing or exposed skin, inspect boundaries, limb ownership, and overlap;
   apply COLOR-02/CHAR-02 only from concrete relationships, never red alone. It adds no fields or
